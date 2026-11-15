@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 
 use tauri::{AppHandle, Emitter};
-use tauri_plugin_updater::UpdaterExt;
 
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
 #[derive(Clone, serde::Serialize)]

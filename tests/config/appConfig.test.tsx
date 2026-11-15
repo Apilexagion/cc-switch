@@ -10,9 +10,9 @@ import {
   isStackAppId,
   usesEditorView,
 } from "@/config/appConfig";
-import { APP_IDS } from "@/config/appSpecs";
+import { APP_IDS, APP_IDS_WITH } from "@/config/appSpecs";
 import { APP_PROFILE_SCOPE } from "@/components/profiles/scope";
-import { PROMPT_APP_IDS, promptAppOf } from "@/lib/query/prompts";
+import { promptAppOf } from "@/lib/query/prompts";
 import { promptFileName } from "@/components/prompts/promptUtils";
 
 describe("appConfig provider lifecycle", () => {
@@ -50,7 +50,7 @@ describe("Antigravity capabilities", () => {
     expect(isStackAppId("agy")).toBe(false);
     expect(usesEditorView("agy")).toBe(false);
     expect(APP_PROFILE_SCOPE.agy).toBeUndefined();
-    expect(PROMPT_APP_IDS).toContain("agy");
+    expect(APP_IDS_WITH.prompts).toContain("agy");
     expect(promptAppOf("agy")).toBe("agy");
     expect(promptFileName("agy")).toBe("AGENTS.md");
   });
@@ -62,7 +62,7 @@ describe("Kimi Code capabilities", () => {
     expect(isAdditiveAppId("kimi")).toBe(true);
     expect(SKILLS_APP_IDS).toContain("kimi");
     expect(MCP_APP_IDS).toContain("kimi");
-    expect(PROMPT_APP_IDS).toContain("kimi");
+    expect(APP_IDS_WITH.prompts).toContain("kimi");
     expect(promptAppOf("kimi")).toBe("kimi");
     expect(promptFileName("kimi")).toBe("AGENTS.md");
     expect(isProxyAppId("kimi")).toBe(false);
@@ -82,7 +82,7 @@ describe("Oh My Pi capabilities", () => {
     expect(isAdditiveAppId("omp")).toBe(true);
     expect(SKILLS_APP_IDS).toContain("omp");
     expect(MCP_APP_IDS).toContain("omp");
-    expect(PROMPT_APP_IDS).toContain("omp");
+    expect(APP_IDS_WITH.prompts).toContain("omp");
     expect(promptAppOf("omp")).toBe("omp");
     expect(promptFileName("omp")).toBe("AGENTS.md");
     expect(isProxyAppId("omp")).toBe(false);
@@ -99,7 +99,7 @@ describe("DeepSeek Harness capabilities", () => {
     expect(isPiFamilyApp("dsh")).toBe(false);
     expect(SKILLS_APP_IDS).toContain("dsh");
     expect(MCP_APP_IDS).toContain("dsh");
-    expect(PROMPT_APP_IDS).toContain("dsh");
+    expect(APP_IDS_WITH.prompts).toContain("dsh");
     expect(promptAppOf("dsh")).toBe("dsh");
     expect(promptFileName("dsh")).toBe("AGENTS.md");
     expect(isProxyAppId("dsh")).toBe(false);
