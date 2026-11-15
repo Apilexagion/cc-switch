@@ -6549,7 +6549,7 @@ model_provider = "c"
         exit(&state, &AppType::Claude)
             .await
             .expect("exit last route");
-        assert!(!current::proxy_flags(PROXY_APPS).contains(&true));
+        assert!(!current::any_proxy());
         assert!(
             state.proxy_service.is_running().await,
             "search still owns the gateway"

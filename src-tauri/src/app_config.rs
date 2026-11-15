@@ -1382,8 +1382,7 @@ mod tests {
         assert!(!app.is_additive_mode());
         assert!(!app.supports_local_proxy());
         assert!(!app.has_route_mode());
-        assert!(!crate::mode::controller::PROXY_APPS.contains(&app));
-        assert!(!crate::mode::stack::supports_stack(&app));
+        assert!(!app.spec().stack);
         assert!(crate::proxy::providers::get_adapter(&app).is_none());
         assert!(crate::services::profile::ProfileScope::for_app(&app).is_none());
         assert!(
@@ -1409,8 +1408,7 @@ mod tests {
         assert!(app.is_additive_mode());
         assert!(!app.supports_local_proxy());
         assert!(!app.has_route_mode());
-        assert!(!crate::mode::controller::PROXY_APPS.contains(&app));
-        assert!(!crate::mode::stack::supports_stack(&app));
+        assert!(!app.spec().stack);
         assert!(crate::proxy::providers::get_adapter(&app).is_none());
         assert!(crate::services::profile::ProfileScope::for_app(&app).is_none());
         assert!(
@@ -1439,8 +1437,7 @@ mod tests {
         assert!(app.is_additive_mode());
         assert!(!app.supports_local_proxy());
         assert!(!app.has_route_mode());
-        assert!(!crate::mode::controller::PROXY_APPS.contains(&app));
-        assert!(!crate::mode::stack::supports_stack(&app));
+        assert!(!app.spec().stack);
         assert!(crate::proxy::providers::get_adapter(&app).is_none());
         assert!(crate::services::profile::ProfileScope::for_app(&app).is_none());
         assert!(
@@ -1476,8 +1473,7 @@ mod tests {
         assert!(app.is_additive_mode());
         assert!(!app.supports_local_proxy());
         assert!(!app.has_route_mode());
-        assert!(!crate::mode::controller::PROXY_APPS.contains(&app));
-        assert!(!crate::mode::stack::supports_stack(&app));
+        assert!(!app.spec().stack);
         assert!(crate::proxy::providers::get_adapter(&app).is_none());
         assert!(crate::services::profile::ProfileScope::for_app(&app).is_none());
         assert!(
