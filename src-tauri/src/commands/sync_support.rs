@@ -196,6 +196,10 @@ pub(crate) async fn sync_save_settings<B: SyncBackend>(
             resolve_secret_for_request::<B>(settings, existing, !password_touched);
         if let Some(status) = existing_status {
             *B::status_mut(&mut sync_settings) = status;
+        } else {
+            // The payload may contain a stale status from before a concurrent
+            // clear. A cleared backend starts with a clean status ledger.
+            *B::status_mut(&mut sync_settings) = WebDavSyncStatus::default();
         }
 
         B::normalize_and_validate(&mut sync_settings)?;
