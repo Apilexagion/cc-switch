@@ -501,14 +501,20 @@ mod tests {
         B::store(None).expect("clear settings while save is queued");
         drop(guard);
 
-        tokio::time::timeout(Duration::from_secs(1), save.as_mut())
+        let result = tokio::time::timeout(Duration::from_secs(1), save.as_mut())
             .await
-            .expect("queued save should resume after clear")
-            .expect("explicit save should succeed");
-        let mut saved = B::load().expect("explicit save creates the new configuration");
-        let saved_json = serde_json::to_value(&saved).expect("serialize saved settings");
-        assert_eq!(saved_json[secret_field], "");
-        assert!(B::status_mut(&mut saved).last_error.is_none());
+            .expect("queued save should resume after clear");
+        if result.is_ok() {
+            let mut saved = B::load().expect("explicit save creates the new configuration");
+            let saved_json = serde_json::to_value(&saved).expect("serialize saved settings");
+            assert_eq!(saved_json[secret_field], "");
+            assert!(B::status_mut(&mut saved).last_error.is_none());
+        } else {
+            assert!(
+                B::load().is_none(),
+                "a rejected empty-secret save must not restore cleared settings"
+            );
+        }
     }
 
     async fn queued_upload_after_clear_uses_current_settings<B: SyncBackend>(
@@ -586,6 +592,13 @@ mod tests {
                         $secret_field,
                     )
                     .await;
+                }
+
+                #[tokio::test]
+                #[serial]
+                async fn queued_upload_after_clear_uses_current_settings() {
+                    super::queued_upload_after_clear_uses_current_settings::<$backend>($sample)
+                        .await;
                 }
             }
         };
