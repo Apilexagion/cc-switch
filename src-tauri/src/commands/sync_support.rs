@@ -508,6 +508,34 @@ mod tests {
         assert!(B::status_mut(&mut saved).last_error.is_none());
     }
 
+    async fn queued_upload_after_clear_uses_current_settings<B: SyncBackend>(
+        sample: fn(bool) -> B::Settings,
+    ) where
+        B::Settings: Serialize,
+    {
+        use_test_home::<B>("queued-upload-after-clear");
+        B::store(Some(sample(true))).expect("seed settings");
+        let db = Database::memory().expect("database");
+        let guard = sync_mutex().lock().await;
+        let upload = sync_upload::<B>(&AppState::new(Arc::new(db)));
+        tokio::pin!(upload);
+
+        assert!(
+            tokio::time::timeout(Duration::from_millis(40), upload.as_mut())
+                .await
+                .is_err(),
+            "upload must wait while clear owns the shared sync lock"
+        );
+        B::store(None).expect("clear settings while upload is queued");
+        drop(guard);
+
+        let error = tokio::time::timeout(Duration::from_secs(1), upload.as_mut())
+            .await
+            .expect("queued upload should resume after clear")
+            .expect_err("upload must reject after configuration is cleared");
+        assert!(error.contains("not configured") || error.contains("未配置"));
+    }
+
     /// Every behavior test runs for each backend, so a backend can only
     /// differ in its `SyncBackend` impl, never in the command logic.
     macro_rules! backend_tests {
