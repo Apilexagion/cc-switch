@@ -505,10 +505,7 @@ pub async fn download_app_update(
 /// 升级无法解决，而不是让其反复尝试。
 #[tauri::command]
 pub async fn check_app_update_available(app: AppHandle) -> Result<Option<String>, String> {
-    let updater = app
-        .updater_builder()
-        .build()
-        .map_err(|e| format!("初始化更新器失败: {e}"))?;
+    let updater = crate::app_update::build_updater(&app)?;
     let update = updater
         .check()
         .await

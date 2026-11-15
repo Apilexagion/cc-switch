@@ -1,7 +1,13 @@
 import React from "react";
 import type { AppId } from "@/lib/api/types";
 import type { VisibleApps } from "@/types";
-import { APP_IDS } from "./appSpecs";
+import {
+  APP_IDS,
+  APP_IDS_WITH,
+  ROUTE_MODE_APP_IDS,
+  appHas,
+  type AppIdWith,
+} from "./appSpecs";
 import {
   ClaudeIcon,
   CodexIcon,
@@ -9,6 +15,39 @@ import {
   OpenClawIcon,
 } from "@/components/BrandIcons";
 import { ProviderIcon } from "@/components/ProviderIcon";
+
+export type ProxyAppId = AppIdWith<"localProxy">;
+export type ModeAppId = AppIdWith<"routeMode">;
+export type StackAppId = AppIdWith<"stack">;
+export type AdditiveAppId = AppIdWith<"additive">;
+export type PiFamilyAppId = AppIdWith<"piFamily">;
+export type McpAppId = AppIdWith<"mcp">;
+
+export const SKILLS_APP_IDS = APP_IDS_WITH.skills;
+export const PROXY_APP_IDS = APP_IDS_WITH.localProxy;
+export const MODE_APP_IDS = ROUTE_MODE_APP_IDS;
+export const STACK_APP_IDS = APP_IDS_WITH.stack;
+export const ADDITIVE_APP_IDS = APP_IDS_WITH.additive;
+export const PI_FAMILY_APP_IDS = APP_IDS_WITH.piFamily;
+export const MCP_APP_IDS = APP_IDS_WITH.mcp;
+export const EDITOR_VIEW_APP_IDS = APP_IDS_WITH.editorView;
+
+export const isProxyAppId = (appId: string): appId is ProxyAppId =>
+  appHas(appId, "localProxy");
+export const isModeAppId = (appId: string): appId is ModeAppId =>
+  appHas(appId, "routeMode");
+export const isStackAppId = (appId: string): appId is StackAppId =>
+  appHas(appId, "stack");
+export const isAdditiveAppId = (appId: string): appId is AdditiveAppId =>
+  appHas(appId, "additive");
+export const isPiFamilyApp = (appId: string): appId is PiFamilyAppId =>
+  appHas(appId, "piFamily");
+export const isMcpAppId = (appId: string): appId is McpAppId =>
+  appHas(appId, "mcp");
+
+export function usesEditorView(appId: AppId): boolean {
+  return appHas(appId, "editorView");
+}
 
 export interface AppConfig {
   label: string;

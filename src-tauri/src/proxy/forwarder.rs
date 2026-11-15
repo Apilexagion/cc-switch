@@ -3716,14 +3716,14 @@ impl RequestForwarder {
             short_value_hash(Some(&filtered_body))
         );
 
-        // 序列化后释放工作副本；只有带着上游签发状态的流式请求，判流内拒绝时还要用请求体。
+        // 带上游签发状态的流式请求在判流内拒绝时仍需请求体，保留副本供响应校验。
         let opaque_state_request = (matches!(app_type, AppType::Codex | AppType::GrokBuild)
             && !codex_responses_to_chat
             && !codex_responses_to_anthropic
             && request_is_streaming
             && self.rectifier_config.enabled
             && carries_opaque_state(&filtered_body))
-        .then_some(filtered_body);
+        .then(|| filtered_body.clone());
 
         // 确定超时
         let timeout = if self.non_streaming_timeout.is_zero() {
@@ -3775,16 +3775,6 @@ impl RequestForwarder {
             }
             attempt.prepared(&filtered_body, &secrets);
         }
-
-        // Diagnostics must inspect the prepared body before ownership is transferred.
-        // Keep it only for encrypted subtask stream validation; other requests release it here.
-        let encrypted_agent_request = (matches!(app_type, AppType::Codex | AppType::GrokBuild)
-            && !codex_responses_to_chat
-            && !codex_responses_to_anthropic
-            && request_is_streaming
-            && self.rectifier_config.enabled
-            && carries_encrypted_agent_task(&filtered_body))
-        .then_some(filtered_body);
 
         let response = if is_socks_proxy || !preserve_exact_header_case {
             // OpenAI / Copilot / Codex 类后端不依赖原始 header 大小写；走 reqwest

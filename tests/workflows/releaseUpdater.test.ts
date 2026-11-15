@@ -72,13 +72,17 @@ describe("fork updater release routing", () => {
     expect(pushTriggers).toContain("feat/magpie-inspired");
   });
 
-  it("uses the same revision-aware comparator for UI checks and backend installs", () => {
-    expect(readRepoFile("src-tauri/src/lib.rs")).toContain(
-      ".plugin(app_updater::builder().build())",
-    );
-    expect(readRepoFile("src-tauri/src/app_updater.rs")).toContain(
-      ".default_version_comparator(",
-    );
+  it("shares the revision-aware comparator across UI and backend updater builders", () => {
+    const plugin = readRepoFile("src-tauri/src/app_updater.rs");
+    expect(plugin).toContain(".default_version_comparator(");
+    const appUpdate = readRepoFile("src-tauri/src/app_update.rs");
+    const builder = appUpdate.match(
+      /pub fn build_updater\b[\s\S]*?\n\}/,
+    )?.[0];
+    expect(builder).toContain(".updater_builder()");
+    expect(builder).toContain(".version_comparator(");
+    expect(builder).toContain("crate::app_updater::is_newer");
+
     const backend = readRepoFile("src-tauri/src/commands/settings.rs");
     for (const command of [
       "install_update_and_restart",
@@ -87,8 +91,8 @@ describe("fork updater release routing", () => {
       const body = backend.match(
         new RegExp(`pub async fn ${command}\\b[\\s\\S]*?\\n\\}`),
       )?.[0];
-      expect(body).toContain(".updater_builder()");
-      expect(body).not.toContain(".version_comparator(");
+      expect(body).toContain("crate::app_update::build_updater(&app)");
+      expect(body).not.toContain(".updater_builder()");
     }
     expect(readRepoFile("src/lib/updater.ts")).not.toContain("allowDowngrades");
   });

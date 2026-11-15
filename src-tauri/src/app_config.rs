@@ -708,6 +708,18 @@ impl AppType {
         self.spec().id
     }
 
+    pub const fn supports_local_proxy(&self) -> bool {
+        self.spec().local_proxy
+    }
+
+    pub const fn has_route_mode(&self) -> bool {
+        self.spec().route_mode
+    }
+
+    pub const fn is_additive_mode(&self) -> bool {
+        self.spec().additive
+    }
+
     /// 所有应用，按默认顺序
     pub const ALL: [AppType; 16] = [
         AppType::Claude,

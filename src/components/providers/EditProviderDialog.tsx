@@ -412,7 +412,7 @@ export function EditProviderDialog({
       }
       backLabel={t("provider.backToList")}
       onClose={handlePanelClose}
-      contentClassName={isPiFamilyApp(appId) ? "pb-0 pt-4" : "pt-4"}
+      contentClassName={appHas(appId, "piFamily") ? "pb-0 pt-4" : "pt-4"}
       footer={
         <>
           <Button

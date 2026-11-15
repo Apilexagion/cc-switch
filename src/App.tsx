@@ -132,7 +132,11 @@ import {
 } from "@/lib/query/omo";
 import { invalidatePiProviderCaches, usePiCurrentState } from "@/lib/query/pi";
 import OpenClawHealthBanner from "@/components/openclaw/OpenClawHealthBanner";
-import { DEFAULT_VISIBLE_APPS, orderAppIds } from "@/config/appConfig";
+import {
+  DEFAULT_VISIBLE_APPS,
+  isPiFamilyApp,
+  orderAppIds,
+} from "@/config/appConfig";
 import { EditProviderHost } from "@/components/providers/EditProviderHost";
 import { preloadOnIdle } from "@/lib/preloadOnIdle";
 import { useCreateEditProviderStore } from "@/components/providers/editProviderStore";

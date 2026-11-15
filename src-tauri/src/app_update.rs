@@ -153,7 +153,11 @@ pub fn begin_install() -> Option<InstallGuard> {
 }
 
 pub fn build_updater(app: &AppHandle) -> Result<Updater, String> {
-    let builder = app.updater_builder();
+    let builder = app
+        .updater_builder()
+        .version_comparator(|current, candidate| {
+            crate::app_updater::is_newer(&current, &candidate.version)
+        });
     // Windows 上 updater 以 `msiexec /passive /promptrestart` 安装 MSI。passive 没有模态框、
     // 未指定重启选项时，安装目录里有文件被占用，Windows Installer 会不经确认直接重启系统
     // （#8534）。`/promptrestart` 只对应 REBOOTPROMPT，挡不住这一点，因此显式追加

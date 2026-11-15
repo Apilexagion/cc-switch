@@ -11,7 +11,7 @@ fn fork_revision(version: &Version) -> Option<u64> {
     revision.parse().ok()
 }
 
-fn is_newer(current: &Version, candidate: &Version) -> bool {
+pub(crate) fn is_newer(current: &Version, candidate: &Version) -> bool {
     let current_core = (current.major, current.minor, current.patch);
     let candidate_core = (candidate.major, candidate.minor, candidate.patch);
     if candidate_core != current_core {

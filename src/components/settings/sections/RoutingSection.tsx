@@ -39,6 +39,7 @@ import {
 } from "@/components/settings/SettingsLayout";
 import type { AppMode } from "@/types/proxy";
 import { cn } from "@/lib/utils";
+import { PROXY_APP_IDS } from "@/config/appConfig";
 import {
   APP_IDS_WITH,
   ROUTE_MODE_APP_IDS,
@@ -122,8 +123,7 @@ export function RoutingSection({ onOpenApp }: RoutingSectionProps) {
     useState<AppIdWith<"localProxy">>("claude");
   const [respMiddlewareApp, setRespMiddlewareApp] =
     useState<AppIdWith<"localProxy">>("claude");
-  const [intentApp, setIntentApp] =
-    useState<AppIdWith<"localProxy">>("claude");
+  const [intentApp, setIntentApp] = useState<AppIdWith<"localProxy">>("claude");
   const [piiApp, setPiiApp] = useState<AppIdWith<"localProxy">>("claude");
   const [reliabilityApp, setReliabilityApp] =
     useState<AppIdWith<"localProxy">>("claude");
