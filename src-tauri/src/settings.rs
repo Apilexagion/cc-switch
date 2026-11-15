@@ -540,6 +540,9 @@ pub struct AppSettings {
     /// Device-local web-tool credentials; only dedicated commands may update.
     #[serde(default)]
     pub search_mcp: crate::search_mcp::SearchMcpConfig,
+    /// 自动下载 CC Switch 新版本，下好后问用户要不要安装（默认关）。设备级，不随云同步。
+    #[serde(default)]
+    pub auto_update_enabled: bool,
     /// 点托盘图标出原生菜单，不出托盘面板（macOS / Windows；Linux 只能出原生菜单，不看这一项）。
     /// 默认关：用托盘面板，想要原生菜单在设置里换回。
     #[serde(default)]
@@ -761,6 +764,7 @@ impl Default for AppSettings {
             check_tool_updates_on_startup: false,
             shared_instruction_file: None,
             search_mcp: crate::search_mcp::SearchMcpConfig::default(),
+            auto_update_enabled: false,
             native_tray_menu: false,
             preserve_codex_official_auth_on_switch: false,
             codex_quota_protection: CodexQuotaProtection::default(),

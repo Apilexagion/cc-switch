@@ -40,6 +40,7 @@ import { RoutingSection } from "@/components/settings/sections/RoutingSection";
 import { PrivacyFilterConfigPanel } from "@/components/settings/PrivacyFilterConfigPanel";
 import { GlobalProxySettings } from "@/components/settings/GlobalProxySettings";
 import { SearchMcpPanel } from "@/components/settings/SearchMcpPanel";
+import { IpDiagnostics } from "@/components/settings/IpDiagnostics";
 import { LogConfigPanel } from "@/components/settings/LogConfigPanel";
 import { GeneralSection } from "@/components/settings/sections/GeneralSection";
 import { AppConfigSection } from "@/components/settings/sections/AppConfigSection";
@@ -408,6 +409,7 @@ export function SettingsPage({
               </div>
             </SettingsBlock>
             <SearchMcpPanel />
+            <IpDiagnostics />
           </>
         );
       case "data":
@@ -536,7 +538,13 @@ export function SettingsPage({
           </>
         );
       case "about":
-        return <AboutSection isPortable={isPortable} />;
+        return (
+          <AboutSection
+            isPortable={isPortable}
+            autoUpdateEnabled={settings?.autoUpdateEnabled ?? false}
+            onAutoSave={handleAutoSave}
+          />
+        );
     }
   };
 

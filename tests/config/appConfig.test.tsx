@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  APP_IDS,
   orderAppIds,
   isAdditiveAppId,
   isPiFamilyApp,
@@ -11,6 +10,7 @@ import {
   isStackAppId,
   usesEditorView,
 } from "@/config/appConfig";
+import { APP_IDS } from "@/config/appSpecs";
 import { APP_PROFILE_SCOPE } from "@/components/profiles/scope";
 import { PROMPT_APP_IDS, promptAppOf } from "@/lib/query/prompts";
 import { promptFileName } from "@/components/prompts/promptUtils";
