@@ -155,9 +155,10 @@ const setupZetaSession = (word = "zeta") => {
 
 describe("SessionManagerPage", () => {
   beforeEach(() => {
-    // 固定在本地正午，避免近期会话在午夜跨入昨天；异步交互仍使用真实计时器。
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date(2026, 9, 18, 12));
+    // 固定在本地时间的中午：会话时间都是「现在往前几小时」，凌晨跑时会跨到昨天，
+    // 「按时间」分组就不稳定。只假 Date 且照常走时，计时器保持真实。
+    vi.useFakeTimers({ toFake: ["Date"], shouldAdvanceTime: true });
+    vi.setSystemTime(new Date(2026, 5, 15, 12, 0, 0));
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
     platform.mac = false;
