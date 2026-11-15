@@ -13,7 +13,7 @@ use crate::store::AppState;
 /// the shared logic below; a backend only supplies its settings, service
 /// calls, and messages.
 pub(crate) trait SyncBackend {
-    type Settings: Send + Sync + 'static;
+    type Settings: Clone + Send + Sync + 'static;
     /// Used in the "connection ok" message and the log prefix.
     const NAME: &'static str;
     /// `(key, zh, en)` of the "not configured" error.
@@ -294,12 +294,15 @@ pub(crate) fn success_payload_with_warning(backup_id: String, warning: Option<St
 mod tests {
     use super::{
         attach_warning, map_sync_result, persist_sync_error, post_sync_warning_from_result,
-        require_enabled_settings, resolve_secret_for_request, run_download_with_lock, SyncBackend,
+        require_enabled_settings, resolve_secret_for_request, run_download_with_lock,
+        sync_save_settings, sync_upload, SyncBackend,
     };
     use crate::commands::{s3_sync::S3Backend, webdav_sync::WebDavBackend};
+    use crate::database::Database;
     use crate::error::AppError;
     use crate::services::sync_protocol::{run_with_sync_lock, sync_mutex};
     use crate::settings::{AppSettings, S3SyncSettings, WebDavSyncSettings};
+    use crate::store::AppState;
     use serde::{de::DeserializeOwned, Serialize};
     use serde_json::json;
     use serial_test::serial;
