@@ -519,8 +519,9 @@ mod tests {
         use_test_home::<B>("queued-upload-after-clear");
         B::store(Some(sample(true))).expect("seed settings");
         let db = Database::memory().expect("database");
+        let state = AppState::new(Arc::new(db));
         let guard = sync_mutex().lock().await;
-        let upload = sync_upload::<B>(&AppState::new(Arc::new(db)));
+        let upload = sync_upload::<B>(&state);
         tokio::pin!(upload);
 
         assert!(
