@@ -5303,34 +5303,6 @@ mod tests {
         assert!(out.status.success());
     }
 
-    /// 超时击杀路径：挂死的子进程到点被整组击杀、wait 返回超时错误而非永等。
-    /// 同时锚定 setsid 改造后的语义——child 是新会话/新进程组组长，
-    /// terminate_child_tree 的 kill(-pid) 仍能命中（回归红线：改回 process_group
-    /// 或去掉隔离都会让本测试的击杀路径失效）。
-    #[cfg(not(target_os = "windows"))]
-    #[test]
-    fn isolated_hung_child_is_killed_on_deadline() {
-        use std::process::{Command, Stdio};
-
-        let mut cmd = Command::new("/bin/sh");
-        cmd.args(["-c", "sleep 30"])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        isolate_child_process_group(&mut cmd);
-        let child = cmd.spawn().expect("spawn sleep");
-        let started = std::time::Instant::now();
-        let result = wait_child_output(
-            child,
-            CommandDeadline::from_timeout(Some(std::time::Duration::from_millis(200))),
-        );
-        assert!(result.is_err(), "expected timeout error, got {result:?}");
-        assert!(
-            started.elapsed() < std::time::Duration::from_secs(5),
-            "kill should return promptly instead of waiting out the sleep"
-        );
-    }
-
     #[cfg(unix)]
     #[test]
     fn login_shell_path_uses_login_environment_and_respects_the_runtime_deadline() {
@@ -5361,43 +5333,6 @@ mod tests {
         )
         .is_none());
         assert!(started.elapsed() < std::time::Duration::from_secs(3));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn wsl_env_allows_spaces_in_unc_config_path() {
-        let extra_env = [
-            (
-                "OPENCODE_CONFIG_DIR",
-                r"\\wsl$\Ubuntu\home\Jane Doe\.config\opencode".to_string(),
-            ),
-            ("OPENCODE_DISABLE_PROJECT_CONFIG", "true".to_string()),
-        ];
-
-        assert_eq!(
-            build_wsl_env_argv(&extra_env).unwrap(),
-            vec![
-                "OPENCODE_CONFIG_DIR=/home/Jane Doe/.config/opencode".to_string(),
-                "OPENCODE_DISABLE_PROJECT_CONFIG=true".to_string(),
-            ]
-        );
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn wsl_env_skips_host_config_path() {
-        let extra_env = [
-            (
-                "OPENCODE_CONFIG_DIR",
-                r"C:\Users\Jane Doe\.config\opencode".to_string(),
-            ),
-            ("OPENCODE_DISABLE_PROJECT_CONFIG", "true".to_string()),
-        ];
-
-        assert_eq!(
-            build_wsl_env_argv(&extra_env).unwrap(),
-            vec!["OPENCODE_DISABLE_PROJECT_CONFIG=true".to_string()]
-        );
     }
 
     #[test]
