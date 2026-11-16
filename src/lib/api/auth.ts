@@ -99,14 +99,6 @@ export async function authCancelLogin(
   });
 }
 
-export async function authListAccounts(
-  authProvider: ManagedAuthProvider,
-): Promise<ManagedAuthAccount[]> {
-  return invoke<ManagedAuthAccount[]>("auth_list_accounts", {
-    authProvider,
-  });
-}
-
 export async function authGetStatus(
   authProvider: ManagedAuthProvider,
 ): Promise<ManagedAuthStatus> {
@@ -304,7 +296,6 @@ export const authApi = {
   authStartLogin,
   authPollForAccount,
   authCancelLogin,
-  authListAccounts,
   authGetStatus,
   authRemoveAccount,
   authSetDefaultAccount,

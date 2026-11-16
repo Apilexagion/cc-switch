@@ -6,6 +6,7 @@ use super::store::Slot;
 use super::switch::finish;
 use super::{default_owner, identity, load_state, update_state, Ctx, Journal, Step, SWITCH};
 use crate::error::AppError;
+use crate::sync_utils::MutexExt;
 
 /// 补完上一次没做完的切换（启动时、每次切换前）。补完的切换停在 [`Step::Done`]，等调用方确认。
 #[cfg(test)]
@@ -16,9 +17,7 @@ pub fn recover(ctx: &Ctx<'_>) -> Result<(), AppError> {
 /// Capture only a journal completed by this recovery, under SWITCH. An
 /// already-completed journal belongs to the caller's initial snapshot.
 pub fn recover_receipted(ctx: &Ctx<'_>) -> Result<Option<Journal>, AppError> {
-    let _serial = SWITCH
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = SWITCH.lock_recover();
     let before = load_state(ctx.data_dir).journal;
     recover_locked(ctx)?;
     let Some(before) = before.filter(|journal| journal.step != Step::Done) else {

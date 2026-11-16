@@ -6,9 +6,7 @@ use cc_switch_lib::{
     Database,
 };
 
-#[path = "support/mod.rs"]
-mod support;
-use support::{ensure_test_home, reset_test_fs, test_mutex};
+use crate::support::{ensure_test_home, reset_test_fs, test_mutex};
 
 #[test]
 fn deeplink_import_opencode_generates_editable_ids_and_preserves_display_names() {

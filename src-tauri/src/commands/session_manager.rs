@@ -211,7 +211,7 @@ pub async fn launch_session_terminal(
                 crate::services::provider::agy_direct::key_resume_target(&db, &native_command)
                     .map_err(|error| error.to_string())?
             {
-                return crate::commands::misc::open_agy_resume_terminal(
+                return crate::commands::terminal_launch::open_agy_resume_terminal(
                     &provider,
                     &conversation,
                     native_cwd,

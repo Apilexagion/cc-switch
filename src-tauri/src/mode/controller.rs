@@ -18,6 +18,7 @@
 //! 调用方持有这个应用的代理切换锁（`ProxyService::lock_switch_for_app`）；写引擎的应用
 //! 写锁在更里面拿，两把锁不反向嵌套。
 
+use crate::sync_utils::MutexExt;
 use serde_json::{json, Value};
 use tokio::sync::OwnedMutexGuard;
 
@@ -1166,15 +1167,6 @@ async fn switch_route_config_locked(
     })
 }
 
-/// 代理模式下手动换路由（拿切换锁）。不支持代理的官方供应商拒绝切入。
-pub async fn switch_route(
-    state: &AppState,
-    app: &AppType,
-    provider_id: &str,
-) -> Result<(), String> {
-    switch_route_checked(state, app, provider_id, false).await
-}
-
 /// 开启故障转移时切到队列 P1（拿切换锁）。Stack 模式不做故障转移，拒绝：否则会换掉默认
 /// 那家。要在锁内、补完上次没做完的操作之后再看模式，锁外读到的可能是旧的。
 pub async fn switch_route_for_failover(
@@ -1886,8 +1878,7 @@ async fn startup_app(state: &AppState, app: &AppType) -> Result<(), String> {
                         .map(|stack| stack.enabled)
                         .unwrap_or(false);
                 startup_attach_failures()
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
+                    .lock_recover()
                     .push(StartupAttachFailure {
                         app_type: app.as_str().to_string(),
                         stack,
@@ -2066,19 +2057,12 @@ fn startup_attach_failures() -> &'static std::sync::Mutex<Vec<StartupAttachFailu
 
 /// 看一眼启动时记下的接上失败（不清空）：托盘的问题区自己留一份，界面照样取走。
 pub fn startup_attach_failures_snapshot() -> Vec<StartupAttachFailure> {
-    startup_attach_failures()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
+    startup_attach_failures().lock_recover().clone()
 }
 
 /// 取走启动时记下的接上失败（取一次就清空）。
 pub fn take_startup_attach_failures() -> Vec<StartupAttachFailure> {
-    std::mem::take(
-        &mut *startup_attach_failures()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()),
-    )
+    std::mem::take(&mut *startup_attach_failures().lock_recover())
 }
 
 #[cfg(test)]
@@ -3499,9 +3483,13 @@ mod mode_tests {
         let old_url = state.proxy_service.build_proxy_urls().await.unwrap().0;
 
         fs::write(settings_path(), "not json").unwrap();
-        let mut config = state.db.get_proxy_config().await.unwrap();
+        let mut config = state.db.get_global_proxy_config().await.unwrap();
         config.listen_port = 0;
-        assert!(state.proxy_service.update_config(&config).await.unwrap());
+        assert!(state
+            .proxy_service
+            .update_global_config(&config)
+            .await
+            .unwrap());
         let new_url = state.proxy_service.build_proxy_urls().await.unwrap().0;
         assert_ne!(new_url, old_url);
 
@@ -4721,7 +4709,7 @@ model_provider = "c"
             json!("acct-b"),
             "Codex signs in as the route's account"
         );
-        switch_route(&state, &AppType::Codex, "acct-a")
+        switch_route_checked(&state, &AppType::Codex, "acct-a", false)
             .await
             .expect("route back to a");
         assert_eq!(account(), json!("acct-a"));
@@ -8773,7 +8761,7 @@ model_provider = "c"
             catalog_slugs(),
             vec!["gpt-a", "ccs-deepseek/deepseek-v4-pro"]
         );
-        switch_route(&state, &AppType::Codex, "deepseek")
+        switch_route_checked(&state, &AppType::Codex, "deepseek", false)
             .await
             .expect("switch route");
         assert_eq!(

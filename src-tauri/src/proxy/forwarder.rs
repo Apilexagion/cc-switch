@@ -1952,7 +1952,7 @@ impl RequestForwarder {
                     }
 
                     // 先分类错误，决定是否计入 provider 健康度
-                    // —— NonRetryable / ClientAbort 是客户端层错误，无论换哪家 provider 都会被拒绝，
+                    // —— NonRetryable 是客户端层错误，无论换哪家 provider 都会被拒绝，
                     //    不应污染熔断器和数据库健康度（与 finish_neutral_failure 同语义）。
                     let category = self.categorize_proxy_error(&e, provider);
 
@@ -1980,8 +1980,8 @@ impl RequestForwarder {
                             // 继续尝试下一个供应商
                             continue;
                         }
-                        ErrorCategory::NonRetryable | ErrorCategory::ClientAbort => {
-                            // 不可重试：客户端层错误或客户端断连 → 不污染健康度，仅释放 HalfOpen permit
+                        ErrorCategory::NonRetryable => {
+                            // 不可重试：客户端层错误 → 不污染健康度，仅释放 HalfOpen permit
                             return Err(self.finish_neutral_failure(e, provider).await);
                         }
                     }
@@ -2669,8 +2669,7 @@ impl RequestForwarder {
                 super::providers::resolve_codex_chat_reasoning_config(provider, &mapped_body);
             // 严格校验的上游（Mistral）拒收 assistant 历史里的 reasoning_content，
             // 与 Claude → Chat 路径的 should_preserve_reasoning_content_for_openai_chat 同口径。
-            let preserve_reasoning_content =
-                !super::providers::codex_chat_upstream_rejects_reasoning_content(&base_url);
+            let preserve_reasoning_content = !super::providers::is_mistral_api(&base_url);
             let mut chat_body =
                 super::providers::transform_codex_chat::responses_to_chat_completions_with_reasoning(
                     mapped_body,
@@ -4492,7 +4491,6 @@ impl RequestForwarder {
             // 网络和上游错误：都应该尝试下一个供应商
             ProxyError::Timeout(_) => ErrorCategory::Retryable,
             ProxyError::ForwardFailed(_) => ErrorCategory::Retryable,
-            ProxyError::ProviderUnhealthy(_) => ErrorCategory::Retryable,
             // 上游 HTTP 错误：按状态码分桶。
             //
             // 客户端请求自身有问题的状态码无论换哪个 provider 都会被拒绝，
@@ -4513,7 +4511,6 @@ impl RequestForwarder {
             ProxyError::ConfigError(_) => ErrorCategory::Retryable,
             ProxyError::TransformError(_) => ErrorCategory::Retryable,
             ProxyError::AuthError(_) => ErrorCategory::Retryable,
-            ProxyError::StreamIdleTimeout(_) => ErrorCategory::Retryable,
             // 无可用供应商：所有供应商都试过了，无法重试
             ProxyError::NoAvailableProvider => ErrorCategory::NonRetryable,
             // 其他错误（数据库/内部错误等）：不是换供应商能解决的问题
@@ -11113,11 +11110,14 @@ mod tests {
             assert!(initial.allowed);
             drop(initial);
             fwd.router
-                .update_all_configs(crate::proxy::circuit_breaker::CircuitBreakerConfig {
-                    failure_threshold: 1,
-                    timeout_seconds: 0,
-                    ..Default::default()
-                })
+                .update_app_configs(
+                    "claude",
+                    crate::proxy::circuit_breaker::CircuitBreakerConfig {
+                        failure_threshold: 1,
+                        timeout_seconds: 0,
+                        ..Default::default()
+                    },
+                )
                 .await;
             fwd.router
                 .record_result("p1", "claude", false, false, Some("fixture failure".into()))

@@ -1,5 +1,6 @@
 //! 切换：把一个账号的登录移进默认槽位（[`check_out`]），或移回它自己的目录（[`vacate`]）。
 
+use crate::sync_utils::MutexExt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -78,9 +79,7 @@ fn run_receipted(
     target_dir: &Path,
     mode: Mode,
 ) -> Result<(Outcome, Option<Journal>), AppError> {
-    let _serial = SWITCH
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = SWITCH.lock_recover();
     recover_locked(ctx)?;
     if load_state(ctx.data_dir)
         .journal
@@ -342,9 +341,7 @@ pub fn vacate_receipted(
     target: &str,
     target_dir: &Path,
 ) -> Result<Option<Journal>, AppError> {
-    let _serial = SWITCH
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let _serial = SWITCH.lock_recover();
     recover_locked(ctx)?;
     if load_state(ctx.data_dir)
         .journal
