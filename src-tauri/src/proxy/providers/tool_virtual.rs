@@ -452,7 +452,11 @@ mod tests {
         assert_eq!(anthropic["usage"]["input_tokens"], 12);
 
         let responses =
-            super::super::transform_codex_chat::chat_completion_to_response(out).unwrap();
+            super::super::transform_codex_chat::chat_completion_to_response_with_context(
+                out,
+                &super::super::transform_codex_chat::CodexToolContext::default(),
+            )
+            .unwrap();
         assert_eq!(responses["output"][0]["type"], "function_call");
         assert_eq!(responses["output"][0]["name"], "get_weather");
         assert_eq!(responses["usage"]["input_tokens"], 12);

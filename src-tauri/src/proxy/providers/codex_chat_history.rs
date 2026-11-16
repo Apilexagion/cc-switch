@@ -800,24 +800,30 @@ mod tests {
 
     #[tokio::test]
     async fn round_trips_gemini_thought_signature_extra_content() {
+        use super::super::transform_codex_chat::{
+            chat_completion_to_response_with_context, CodexToolContext,
+        };
         // Gemini OpenAI 兼容接口要求下一轮原样带回 tool call 的 thought signature（#8336）。
         let signature = json!({"google": {"thought_signature": "sig-abc"}});
-        let response = super::super::transform_codex_chat::chat_completion_to_response(json!({
-            "id": "chatcmpl_gemini",
-            "model": "gemini-4-argon",
-            "choices": [{
-                "message": {
-                    "role": "assistant",
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {"name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"},
-                        "extra_content": signature
-                    }]
-                },
-                "finish_reason": "tool_calls"
-            }]
-        }))
+        let response = chat_completion_to_response_with_context(
+            json!({
+                "id": "chatcmpl_gemini",
+                "model": "gemini-4-argon",
+                "choices": [{
+                    "message": {
+                        "role": "assistant",
+                        "tool_calls": [{
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "exec_command", "arguments": "{\"cmd\":\"ls\"}"},
+                            "extra_content": signature
+                        }]
+                    },
+                    "finish_reason": "tool_calls"
+                }]
+            }),
+            &CodexToolContext::default(),
+        )
         .unwrap();
         let output = response["output"].as_array().unwrap();
         let call = output
@@ -846,7 +852,10 @@ mod tests {
         assert_eq!(history.enrich_request(&mut request, None).await, 1);
 
         let chat =
-            super::super::transform_codex_chat::responses_to_chat_completions(request).unwrap();
+            super::super::transform_codex_chat::responses_to_chat_completions_with_reasoning(
+                request, None, true,
+            )
+            .unwrap();
         let assistant = chat["messages"]
             .as_array()
             .unwrap()
@@ -889,7 +898,10 @@ mod tests {
             });
             assert_eq!(history.enrich_request(&mut request, None).await, 1);
             let mut chat =
-                super::super::transform_codex_chat::responses_to_chat_completions(request).unwrap();
+                super::super::transform_codex_chat::responses_to_chat_completions_with_reasoning(
+                    request, None, true,
+                )
+                .unwrap();
             assert_eq!(
                 super::super::codex_chat_common::fill_gemini_thought_signature_fallback(&mut chat),
                 0
@@ -1094,7 +1106,10 @@ mod tests {
 
         history.enrich_request(&mut request, None).await;
         let chat =
-            super::super::transform_codex_chat::responses_to_chat_completions(request).unwrap();
+            super::super::transform_codex_chat::responses_to_chat_completions_with_reasoning(
+                request, None, true,
+            )
+            .unwrap();
         let assistants: Vec<_> = chat["messages"]
             .as_array()
             .unwrap()

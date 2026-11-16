@@ -210,6 +210,15 @@ pub(crate) async fn sync_save_settings<B: SyncBackend>(
     .map_err(|e| e.to_string())
 }
 
+/// Forget the saved config (connection, credentials, remote root, status) on
+/// this device. Remote snapshots are left untouched.
+pub(crate) async fn sync_clear_settings<B: SyncBackend>() -> Result<Value, String> {
+    run_with_sync_lock(async { B::store(None) })
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(json!({ "success": true }))
+}
+
 pub(crate) async fn sync_fetch_remote_info<B: SyncBackend>() -> Result<Value, String> {
     run_with_sync_lock(async {
         let settings = require_enabled_settings::<B>().map_err(AppError::Message)?;
@@ -299,7 +308,7 @@ mod tests {
     use super::{
         attach_warning, map_sync_result, persist_sync_error, post_sync_warning_from_result,
         require_enabled_settings, resolve_secret_for_request, run_download_with_lock,
-        sync_save_settings, sync_upload, SyncBackend,
+        sync_clear_settings, sync_save_settings, sync_upload, SyncBackend,
     };
     use crate::commands::{s3_sync::S3Backend, webdav_sync::WebDavBackend};
     use crate::database::Database;
@@ -550,6 +559,33 @@ mod tests {
         assert!(error.contains("not configured") || error.contains("未配置"));
     }
 
+    async fn clear_waits_for_lock_then_forgets<B: SyncBackend>(sample: fn(bool) -> B::Settings) {
+        use_test_home::<B>("clear");
+        B::store(Some(sample(true))).expect("seed settings");
+
+        let guard = sync_mutex().lock().await;
+        let clear = sync_clear_settings::<B>();
+        tokio::pin!(clear);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(40), clear.as_mut())
+                .await
+                .is_err(),
+            "clearing must wait while a sync operation holds the global lock"
+        );
+        assert!(
+            B::load().is_some(),
+            "the config must survive until the lock is free"
+        );
+
+        drop(guard);
+        let result = tokio::time::timeout(Duration::from_secs(1), clear.as_mut())
+            .await
+            .expect("clear should finish after lock release")
+            .expect("clear should succeed");
+        assert_eq!(result, json!({ "success": true }));
+        assert!(B::load().is_none(), "the saved config must be gone");
+    }
+
     /// Every behavior test runs for each backend, so a backend can only
     /// differ in its `SyncBackend` impl, never in the command logic.
     macro_rules! backend_tests {
@@ -603,6 +639,12 @@ mod tests {
                 async fn queued_upload_after_clear_uses_current_settings() {
                     super::queued_upload_after_clear_uses_current_settings::<$backend>($sample)
                         .await;
+                }
+
+                #[tokio::test]
+                #[serial]
+                async fn clear_settings_waits_for_the_sync_lock_then_forgets_the_config() {
+                    super::clear_waits_for_lock_then_forgets::<$backend>($sample).await;
                 }
             }
         };

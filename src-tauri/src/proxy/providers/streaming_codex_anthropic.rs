@@ -717,14 +717,6 @@ pub(crate) fn responses_sse_events_from_anthropic_message(
     sse::with_message_phases(events, state.final_answer_eligible())
 }
 
-/// Convert the upstream Anthropic Messages SSE into the Responses SSE that Codex expects.
-#[allow(dead_code)]
-pub fn create_responses_sse_stream_from_anthropic<E: std::error::Error + Send + 'static>(
-    stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
-) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
-    create_responses_sse_stream_from_anthropic_with_context(stream, CodexToolContext::default())
-}
-
 pub(crate) fn create_responses_sse_stream_from_anthropic_with_context<
     E: std::error::Error + Send + 'static,
 >(
@@ -840,7 +832,10 @@ mod tests {
         let upstream = stream::iter(vec![Ok::<_, std::io::Error>(Bytes::from(
             input.as_bytes().to_vec(),
         ))]);
-        let converted = create_responses_sse_stream_from_anthropic(upstream);
+        let converted = create_responses_sse_stream_from_anthropic_with_context(
+            upstream,
+            CodexToolContext::default(),
+        );
         let chunks: Vec<_> = converted.collect().await;
         chunks
             .into_iter()
@@ -979,7 +974,10 @@ mod tests {
             wire.as_bytes(),
         ))])
         .chain(stream::pending());
-        let converted = create_responses_sse_stream_from_anthropic(source);
+        let converted = create_responses_sse_stream_from_anthropic_with_context(
+            source,
+            CodexToolContext::default(),
+        );
         futures::pin_mut!(converted);
         loop {
             let chunk = tokio::time::timeout(std::time::Duration::from_secs(1), converted.next())
