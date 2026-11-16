@@ -475,6 +475,24 @@ export const handlers = [
     success(false),
   ),
   http.post(`${TAURI_ENDPOINT}/get_failover_queue`, () => success([])),
+  http.post(`${TAURI_ENDPOINT}/get_failover_queue_for_model`, () =>
+    success([]),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_provider_routing_strategy`, () =>
+    success("order"),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_provider_sticky_enabled`, () =>
+    success(false),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_subscription_account_failover_enabled`, () =>
+    success(false),
+  ),
+  http.post(`${TAURI_ENDPOINT}/get_claude_model_routing_settings`, () =>
+    success({ routeEnabled: false, modelFailoverEnabled: false }),
+  ),
+  http.post(`${TAURI_ENDPOINT}/list_claude_model_route_policies`, () =>
+    success([]),
+  ),
 
   // 模式行：默认都在直连，直连那家就是当前供应商
   http.post(`${TAURI_ENDPOINT}/get_app_mode`, async ({ request }) => {
