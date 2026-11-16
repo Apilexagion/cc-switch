@@ -1195,7 +1195,6 @@
       "pendingEnabled": "Etkinleştirme ayarında kaydedilmemiş değişiklik var. Uygulamak için kaydedin.",
       "proxyStatusUnknown": "Ortak yerel vekil durumu yenilenmeyi bekliyor"
     },
-    "ompConfigDir": "Oh My Pi Yapılandırma Dizini",
     "browsePlaceholderOmp": "ör. /home/<your-username>/.omp/agent",
     "portableUpdateHint": "Taşınabilir modda yukarıdaki düğme yeni ZIP dosyasını indirir. ZIP'i açıp mevcut cc-switch.exe dosyasını yenisiyle değiştirin. Ayarlarınız ve verileriniz kullanıcı klasörünüzdeki .cc-switch dizininde bulunur ve etkilenmez.",
     "browsePlaceholderDsh": "ör. /home/<your-username>/.dsh",
