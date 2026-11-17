@@ -1048,7 +1048,7 @@ fn test_import_prompt_allows_space_in_base64_content() {
 #[test]
 #[serial_test::serial]
 fn test_disabled_claude_prompt_import_does_not_rewrite_live_files() {
-    let _test_home = TestHomeGuard::new();
+    let _test_home = crate::test_support::TestHome::new();
     let main_path = prompt_file_path(&AppType::Claude).expect("resolve main prompt path");
     let append_path = runtime_projection_path();
     fs::create_dir_all(main_path.parent().expect("main prompt parent"))

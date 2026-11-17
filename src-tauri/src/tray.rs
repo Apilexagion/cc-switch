@@ -3676,15 +3676,16 @@ mod tests {
     }
 
     fn auto_usage_provider(enabled: bool, interval: Option<u64>) -> Provider {
-        provider(
-            serde_json::json!({"usage_script": {
+        serde_json::from_value(serde_json::json!({
+            "id":"p1", "name":"Provider", "settingsConfig": {},
+            "meta":{"usage_script": {
                 "enabled": enabled,
                 "language": "javascript",
                 "code": "",
                 "autoQueryInterval": interval
-            }}),
-            serde_json::json!({}),
-        )
+            }}
+        }))
+        .unwrap()
     }
 
     #[test]

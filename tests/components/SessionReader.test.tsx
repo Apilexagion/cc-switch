@@ -557,6 +557,21 @@ describe("SessionReader", () => {
     }
   });
 
+  it("cancels the outline highlight timer when the reader unmounts", () => {
+    const schedule = vi.spyOn(globalThis, "setTimeout");
+    const cancel = vi.spyOn(globalThis, "clearTimeout");
+    const { unmount } = renderReader("claude", fixtures.claude);
+    const outline = screen.getByRole("navigation", { name: "对话目录" });
+    fireEvent.click(within(outline).getByText(/构建已经通过/));
+    const index = schedule.mock.calls
+      .map(([, delay]) => delay)
+      .lastIndexOf(2000);
+    expect(index).toBeGreaterThanOrEqual(0);
+    const timer = schedule.mock.results[index].value;
+    unmount();
+    expect(cancel).toHaveBeenCalledWith(timer);
+  });
+
   it("右侧对话目录区分人和 Agent，可开关", () => {
     renderReader("claude", fixtures.claude);
     const outline = screen.getByRole("navigation", { name: "对话目录" });

@@ -1608,12 +1608,9 @@ mod tests {
             1,
             "direct switch has one owner"
         );
-        db.update_global_proxy_config(crate::proxy::types::GlobalProxyConfig {
-            listen_port: 0,
-            ..Default::default()
-        })
-        .await
-        .unwrap();
+        let mut config = db.get_global_proxy_config().await.unwrap();
+        config.listen_port = 0;
+        db.update_global_proxy_config(config).await.unwrap();
         for stack_mode in [false, true] {
             crate::mode::controller::enter(&state, &AppType::Claude, stack_mode)
                 .await

@@ -256,6 +256,7 @@ fn remaining_database_commands_yield_during_session_sync_contention() {
         remove_skill_repo,
         "octocat".into(),
         "skills".into(),
+        None,
         None
     ));
 

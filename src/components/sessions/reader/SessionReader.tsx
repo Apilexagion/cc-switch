@@ -195,6 +195,13 @@ export function SessionReader({
   const [findQuery, setFindQuery] = useState(initialFind?.query ?? "");
   const [findIndex, setFindIndex] = useState(1);
   const [flashKey, setFlashKey] = useState<string | null>(null);
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimerRef.current !== null) clearTimeout(flashTimerRef.current);
+    },
+    [],
+  );
   const [atBottom, setAtBottom] = useState<boolean | null>(null);
   // 右侧对话目录：默认打开，开关记在本地
   const [outlineOpen, setOutlineOpen] = useState(() => {
@@ -316,10 +323,11 @@ export function SessionReader({
 
   const flash = useCallback((key: string) => {
     setFlashKey(key);
-    window.setTimeout(
-      () => setFlashKey((current) => (current === key ? null : current)),
-      2000,
-    );
+    if (flashTimerRef.current !== null) clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = setTimeout(() => {
+      flashTimerRef.current = null;
+      setFlashKey((current) => (current === key ? null : current));
+    }, 2000);
   }, []);
 
   const scrollToRow = useCallback(

@@ -4389,7 +4389,7 @@ impl SkillService {
     /// `check_updates`、`update_skill` 四条路径都经过它，而 `skill_repos` / `skills`
     /// 两张表都会被同步导入的远端快照整表覆盖，入库校验管不住它们。所以主防线放这里。
     async fn download_repo(&self, repo: &SkillRepo) -> Result<(tempfile::TempDir, String)> {
-        repo.validate()?;
+        Self::validate_repo(repo)?;
         let source = RepoSource::for_repo(repo)?;
 
         // 守卫全程持有，成功后连同目录一起交给调用方（见 `extract_local_zip` 的说明）。
@@ -4457,7 +4457,7 @@ impl SkillService {
         F: FnMut(String) -> Fut,
         Fut: std::future::Future<Output = Result<()>>,
     {
-        repo.validate()?;
+        Self::validate_repo(repo)?;
         let mut branches = Vec::new();
         if !repo.branch.is_empty() && !repo.branch.eq_ignore_ascii_case("HEAD") {
             branches.push(repo.branch.as_str());
