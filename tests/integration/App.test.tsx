@@ -240,7 +240,7 @@ describe("App integration with MSW", () => {
     setSettings({
       firstRunNoticeConfirmed: true,
       newLayoutNoticeConfirmed: true,
-      whatsNewSeenVersion: "4.0.33",
+      whatsNewSeenVersion: "4.0.34",
     });
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();

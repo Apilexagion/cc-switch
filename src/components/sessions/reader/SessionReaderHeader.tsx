@@ -355,22 +355,21 @@ export const SessionReaderHeader = memo(function SessionReaderHeader({
         >
           {t("sessionManager.deleteEllipsis", { defaultValue: "删除…" })}
         </DropdownMenuItem>
-        {!deletable &&
-          (readOnly || nativeDeleteHintKey(session.providerId)) && (
-            <p className="px-2.5 pb-1.5 text-caption text-fg-2">
-              {readOnly
-                ? t("sessionManager.subagents.readOnlyHint", {
-                    defaultValue: "子代理会话仅供阅读，请在主会话中继续操作",
-                  })
-                : t(
-                    nativeDeleteHintKey(session.providerId) ??
-                      "sessionManager.mcodeDeleteHint",
-                    {
-                      defaultValue: nativeDeleteHintDefault(session.providerId),
-                    },
-                  )}
-            </p>
-          )}
+        {!deletable && (readOnly || nativeDeleteHintKey(session)) && (
+          <p className="px-2.5 pb-1.5 text-caption text-fg-2">
+            {readOnly
+              ? t("sessionManager.subagents.readOnlyHint", {
+                  defaultValue: "子代理会话仅供阅读，请在主会话中继续操作",
+                })
+              : t(
+                  nativeDeleteHintKey(session) ??
+                    "sessionManager.mcodeDeleteHint",
+                  {
+                    defaultValue: nativeDeleteHintDefault(session.providerId),
+                  },
+                )}
+          </p>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

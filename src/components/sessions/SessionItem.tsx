@@ -166,13 +166,9 @@ export function SessionItem({
       ? t("sessionManager.subagents.readOnlyHint", {
           defaultValue: "子代理会话仅供阅读，请在主会话中继续操作",
         })
-      : t(
-          nativeDeleteHintKey(session.providerId) ??
-            "sessionManager.mcodeDeleteHint",
-          {
-            defaultValue: nativeDeleteHintDefault(session.providerId),
-          },
-        )
+      : t(nativeDeleteHintKey(session) ?? "sessionManager.mcodeDeleteHint", {
+          defaultValue: nativeDeleteHintDefault(session.providerId),
+        })
     : null;
 
   const row = (

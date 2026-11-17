@@ -45,7 +45,10 @@ const meta = (providerId: string): SessionMeta => ({
   projectDir: PROJECT,
   createdAt: 1791014400000,
   lastActiveAt: 1791018000000,
-  sourcePath: `/mock/${providerId}.jsonl`,
+  sourcePath:
+    providerId === "agy"
+      ? "/mock/antigravity/brain/agy/transcript_full.jsonl"
+      : `/mock/${providerId}.jsonl`,
   resumeCommand: `${providerId} resume`,
 });
 

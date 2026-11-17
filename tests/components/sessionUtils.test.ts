@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildCdResumeCommand,
   canDeleteSession,
+  nativeDeleteHintKey,
   canResumeSession,
   isReadOnlySession,
   getSessionLastText,
@@ -14,7 +15,43 @@ import {
 import type { SessionMeta } from "@/types";
 
 describe("session utils", () => {
-  it.each(["agy", "mcode", "dsh"])(
+  it("lets Antigravity CLI sessions be deleted but keeps IDE and index-only ones native", () => {
+    const agy = (sourcePath?: string): SessionMeta => ({
+      providerId: "agy",
+      sessionId: "aaa-1",
+      sourcePath,
+    });
+    const log = ".system_generated/logs/transcript_full.jsonl";
+    const cli = agy(`/home/u/.gemini/antigravity-cli/brain/aaa-1/${log}`);
+    const keyCard = agy(
+      `C:\\Users\\u\\.cc-switch\\agy\\p\\antigravity-cli\\brain\\aaa-1\\${log}`,
+    );
+    const ide = agy(`/home/u/.gemini/antigravity/brain/aaa-1/${log}`);
+    const indexOnly = agy();
+
+    expect(canDeleteSession(cli)).toBe(true);
+    expect(canDeleteSession(keyCard)).toBe(true);
+    for (const marker of [
+      { readOnly: true },
+      { role: "subagent" as const },
+      { parentSessionId: "parent" },
+    ])
+      expect(canDeleteSession({ ...cli, ...marker })).toBe(false);
+    expect(nativeDeleteHintKey(cli)).toBeUndefined();
+    for (const session of [ide, indexOnly]) {
+      expect(canDeleteSession(session)).toBe(false);
+      expect(nativeDeleteHintKey(session)).toBe("sessionManager.agyDeleteHint");
+    }
+    expect(
+      canDeleteSession({
+        providerId: "copilot",
+        sessionId: "s",
+        sourcePath: "/x",
+      }),
+    ).toBe(false);
+  });
+
+  it.each(["mcode", "dsh"])(
     "keeps %s main sessions resumable but prevents CCS deletion",
     (providerId) => {
       const session: SessionMeta = {

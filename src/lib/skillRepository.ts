@@ -52,6 +52,7 @@ export function parseSkillRepositoryUrl(
     provider === "gitlab" ||
     (provider === "auto" &&
       (trimmed.includes("gitlab") ||
+        /\/src\/(?:branch|tag|commit)\//.test(trimmed) ||
         /\/-\//.test(trimmed) ||
         /^(?:git@|ssh:\/\/)/i.test(trimmed)))
   ) {

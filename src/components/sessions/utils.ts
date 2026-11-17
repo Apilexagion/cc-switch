@@ -90,12 +90,19 @@ const NATIVE_DELETE_HINTS: Record<
 
 export const canDeleteSession = (session: SessionMeta) =>
   Boolean(session.sourcePath) &&
-  !(session.providerId in NATIVE_DELETE_HINTS) &&
+  !nativeDeleteHintKey(session) &&
   !isReadOnlySession(session);
 
 /** 不能在 CC Switch 里删除时，提示去哪里删的文案 key。 */
-export const nativeDeleteHintKey = (providerId: string): string | undefined =>
-  NATIVE_DELETE_HINTS[providerId]?.key;
+export const nativeDeleteHintKey = (
+  session: SessionMeta,
+): string | undefined =>
+  session.providerId === "agy"
+    ? !session.sourcePath ||
+      /[\\/]antigravity[\\/]brain[\\/]/.test(session.sourcePath)
+      ? NATIVE_DELETE_HINTS.agy.key
+      : undefined
+    : NATIVE_DELETE_HINTS[session.providerId]?.key;
 
 export const nativeDeleteHintDefault = (providerId: string): string =>
   NATIVE_DELETE_HINTS[providerId]?.defaultValue ?? "请在原客户端中删除";
