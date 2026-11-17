@@ -64,7 +64,14 @@
     "https://api.openai.com/v1": null
   },
   "quotaWarnBelowPercent": 20.0,
-  "exchangeRateCurrencies": ["CNY", "EUR", "JPY", "TWD", "TRY", "KRW"],
+  "exchangeRateCurrencies": [
+    "CNY",
+    "EUR",
+    "JPY",
+    "TWD",
+    "TRY",
+    "KRW"
+  ],
   "customIcon": {
     "prefix": "data:image/png;base64,",
     "maxLength": 65536,

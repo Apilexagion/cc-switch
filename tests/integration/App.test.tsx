@@ -1,5 +1,5 @@
 import { Suspense, type ComponentType } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   render,
@@ -20,6 +20,7 @@ import {
 } from "../msw/state";
 import { emitTauriEvent } from "../msw/tauriMocks";
 import { server } from "../msw/server";
+import { createTestQueryClient } from "../utils/testQueryClient";
 
 const toastSuccessMock = vi.fn();
 const toastErrorMock = vi.fn();
@@ -221,7 +222,7 @@ const sidebarApp = (name: string) =>
   });
 
 const renderApp = (AppComponent: ComponentType) => {
-  const client = new QueryClient();
+  const client = createTestQueryClient();
   return render(
     <QueryClientProvider client={client}>
       <Suspense fallback={<div data-testid="loading">loading</div>}>
@@ -232,8 +233,15 @@ const renderApp = (AppComponent: ComponentType) => {
 };
 
 describe("App integration with MSW", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // The editor is loaded lazily. Resolve its async mock before timing UI assertions.
+    await import("@/components/providers/EditProviderDialog");
     resetProviderState();
+    setSettings({
+      firstRunNoticeConfirmed: true,
+      newLayoutNoticeConfirmed: true,
+      whatsNewSeenVersion: "4.0.33",
+    });
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
     skillsPanelMocks.initialViews = [];
@@ -567,7 +575,7 @@ describe("App integration with MSW", () => {
     // 改过：先问；继续编辑就留在原页
     // （ConfirmDialog 在这个文件里是 mock：只渲染消息和 confirm-delete / cancel-delete）
     fireEvent.click(screen.getByText("edit"));
-    fireEvent.input(screen.getByLabelText("edit-field"), {
+    fireEvent.input(await screen.findByLabelText("edit-field"), {
       target: { value: "draft" },
     });
     fireEvent.click(sidebarApp("Claude Code"));
