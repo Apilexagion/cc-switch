@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { parseSkillRepositoryUrl, skillRepositoryKey, skillRepositoryUrl } from "@/lib/skillRepository";
+import {
+  parseSkillRepositoryUrl,
+  skillRepositoryKey,
+  skillRepositoryUrl,
+} from "@/lib/skillRepository";
 import { replaceRepoDiscovery } from "@/hooks/useSkills.helpers";
 import type { DiscoverableSkill } from "@/lib/api/skills";
 
@@ -16,41 +20,149 @@ describe("Skill repository sources", () => {
     expect(parseSkillRepositoryUrl(url.toString())).toBeNull();
   });
   it("preserves GitHub shorthand and optional-field compatibility", () => {
-    expect(parseSkillRepositoryUrl("owner/repo")).toEqual({ owner: "owner", name: "repo" });
-    expect(parseSkillRepositoryUrl("https://github.com/owner/repo.git/")).toEqual({ owner: "owner", name: "repo" });
-    expect(skillRepositoryUrl({ owner: "owner", name: "repo" })).toBe("https://github.com/owner/repo");
-    expect(skillRepositoryKey({ owner: "owner", name: "repo" })).toBe("owner/repo");
-  });
-
-  it.each(["https://codeberg.org/owner/repo", "https://git.example:8443/forge/owner/repo"])("accepts Forgejo root %s", (url) => {
-    expect(parseSkillRepositoryUrl(url)).toEqual({ owner: "owner", name: "repo", repoUrl: url });
+    expect(parseSkillRepositoryUrl("owner/repo")).toEqual({
+      owner: "owner",
+      name: "repo",
+    });
+    expect(
+      parseSkillRepositoryUrl("https://github.com/owner/repo.git/"),
+    ).toEqual({ owner: "owner", name: "repo" });
+    expect(skillRepositoryUrl({ owner: "owner", name: "repo" })).toBe(
+      "https://github.com/owner/repo",
+    );
+    expect(skillRepositoryKey({ owner: "owner", name: "repo" })).toBe(
+      "owner/repo",
+    );
   });
 
   it.each([
-    "http://codeberg.org/owner/repo", "https://user:password@codeberg.org/owner/repo",
-    "https://codeberg.org/owner/repo?token=example", "https://codeberg.org/owner/repo#main",
-    "https://codeberg.org/a/../owner/repo", "https://codeberg.org/owner%2Frepo",
-    "https://github.com/owner/repo/tree/main", "https://codeberg.org/owner/repo\\suffix",
+    "https://codeberg.org/owner/repo",
+    "https://git.example:8443/forge/owner/repo",
+  ])("accepts Forgejo root %s", (url) => {
+    expect(parseSkillRepositoryUrl(url)).toEqual({
+      owner: "owner",
+      name: "repo",
+      repoUrl: url,
+    });
+  });
+
+  it.each([
+    "http://codeberg.org/owner/repo",
+    "https://user:password@codeberg.org/owner/repo",
+    "https://codeberg.org/owner/repo?token=example",
+    "https://codeberg.org/owner/repo#main",
+    "https://codeberg.org/a/../owner/repo",
+    "https://codeberg.org/owner%2Frepo",
+    "https://github.com/owner/repo/tree/main",
+    "https://codeberg.org/owner/repo\\suffix",
   ])("rejects non-root or credential-bearing URL %s", (url) => {
     expect(parseSkillRepositoryUrl(url)).toBeNull();
   });
 
   it("repository cache mutations cannot remove another host's same-name repository", () => {
     const row = (key: string, repoUrl?: string): DiscoverableSkill => ({
-      key, name: key, description: "", directory: "a", repoOwner: "owner",
-      repoName: "repo", repoBranch: "main", ...(repoUrl ? { repoUrl } : {}),
+      key,
+      name: key,
+      description: "",
+      directory: "a",
+      repoOwner: "owner",
+      repoName: "repo",
+      repoBranch: "main",
+      ...(repoUrl ? { repoUrl } : {}),
     });
     const codeberg = "https://codeberg.org/owner/repo";
     const selfHosted = "https://git.example/owner/repo";
     const existing = {
-      skills: [row("github"), row("codeberg", codeberg), row("self-hosted", selfHosted)],
+      skills: [
+        row("github"),
+        row("codeberg", codeberg),
+        row("self-hosted", selfHosted),
+      ],
       failures: [
         { owner: "owner", name: "repo", branch: "main", error: "github" },
-        { owner: "owner", name: "repo", branch: "main", error: "codeberg", repoUrl: codeberg },
+        {
+          owner: "owner",
+          name: "repo",
+          branch: "main",
+          error: "codeberg",
+          repoUrl: codeberg,
+        },
       ],
     };
-    const result = replaceRepoDiscovery(existing, { owner: "owner", name: "repo", repoUrl: codeberg });
-    expect(result?.skills.map((skill) => skill.key)).toEqual(["github", "self-hosted"]);
-    expect(result?.failures.map((failure) => failure.error)).toEqual(["github"]);
+    const result = replaceRepoDiscovery(existing, {
+      owner: "owner",
+      name: "repo",
+      repoUrl: codeberg,
+    });
+    expect(result?.skills.map((skill) => skill.key)).toEqual([
+      "github",
+      "self-hosted",
+    ]);
+    expect(result?.failures.map((failure) => failure.error)).toEqual([
+      "github",
+    ]);
+  });
+  it("isolates GitLab hosts in repository cache mutations", () => {
+    const row = (host: string): DiscoverableSkill => ({
+      key: host + "/owner/repo:a",
+      name: host,
+      description: "",
+      directory: "a",
+      repoHost: host,
+      repoOwner: "owner",
+      repoName: "repo",
+      repoBranch: "main",
+    });
+    const existing = {
+      skills: [
+        row("github.com"),
+        row("git.example:8443"),
+        row("git.example:9443"),
+      ],
+      failures: [
+        {
+          owner: "owner",
+          name: "repo",
+          branch: "main",
+          host: "git.example:9443",
+          error: "offline",
+        },
+      ],
+    };
+    const result = replaceRepoDiscovery(existing, {
+      owner: "owner",
+      name: "repo",
+      host: "git.example:8443",
+    });
+    expect(result?.skills.map((s) => s.repoHost)).toEqual([
+      "git.example:9443",
+      "github.com",
+    ]);
+    expect(result?.failures).toEqual(existing.failures);
+    expect(
+      skillRepositoryKey({
+        owner: "owner",
+        name: "repo",
+        host: "git.example:8443",
+      }),
+    ).not.toBe(
+      skillRepositoryKey({
+        owner: "owner",
+        name: "repo",
+        host: "git.example:9443",
+      }),
+    );
+  });
+
+  it("validates GitLab input before stripping UI paths", () => {
+    expect(
+      parseSkillRepositoryUrl("https://gitlab.example/group/repo/-/tree/main"),
+    ).toEqual({ host: "gitlab.example", owner: "group", name: "repo" });
+    const url = new URL("https://gitlab.example/group/repo");
+    url.username = "user";
+    expect(parseSkillRepositoryUrl(url.toString())).toBeNull();
+    expect(
+      parseSkillRepositoryUrl("https://git.example/group/repo", "gitlab"),
+    ).toEqual({ host: "git.example", owner: "group", name: "repo" });
   });
 });

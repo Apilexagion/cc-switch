@@ -263,9 +263,9 @@ export function ProviderCard({
   const manualNote = provider.notes?.trim() || undefined;
   const providerNameIncludesAccountLogin = Boolean(
     managedCodexAccount?.login &&
-      (provider.name.trim() === managedCodexAccount.login ||
-        provider.name.trim() ===
-          `OpenAI Official (${managedCodexAccount.login})`),
+    (provider.name.trim() === managedCodexAccount.login ||
+      provider.name.trim() ===
+        `OpenAI Official (${managedCodexAccount.login})`),
   );
 
   const { data: health } = useProviderHealth(
@@ -314,8 +314,7 @@ export function ProviderCard({
     provider.meta?.usage_script?.enabled ??
     (isBoundCodexOfficial || Boolean(claudeBoundAccountId));
   const supportsOfficialSubscription =
-    isOfficial &&
-    ["claude", "codex", "gemini", "grokbuild", "agy"].includes(appId);
+    isOfficial && appHas(appId, "officialSubscription");
   const isOfficialSubscriptionUsage =
     provider.meta?.usage_script?.templateType ===
     TEMPLATE_TYPES.OFFICIAL_SUBSCRIPTION;

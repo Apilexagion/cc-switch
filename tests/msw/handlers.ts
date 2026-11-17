@@ -23,7 +23,6 @@ import {
   setSettings,
   getAppConfigDirOverride,
   setAppConfigDirOverrideState,
-  getMcpConfig,
   listCustomIcons,
   addCustomIcon,
   renameCustomIcon,
@@ -272,13 +271,6 @@ export const handlers = [
   }),
 
   // MCP APIs
-  http.post(`${TAURI_ENDPOINT}/get_mcp_config`, async ({ request }) => {
-    const { app } = await withJson<{ app: AppId }>(request);
-    return success(getMcpConfig(app));
-  }),
-
-  http.post(`${TAURI_ENDPOINT}/import_mcp_from_claude`, () => success(1)),
-  http.post(`${TAURI_ENDPOINT}/import_mcp_from_codex`, () => success(1)),
   http.post(`${TAURI_ENDPOINT}/resync_mcp_to_apps`, async ({ request }) => {
     const { apps } = await withJson<{ apps?: AppId[] | null }>(request);
     const targets = apps?.length
@@ -353,18 +345,6 @@ export const handlers = [
   }),
 
   http.post(`${TAURI_ENDPOINT}/is_portable_mode`, () => success(false)),
-
-  http.post(
-    `${TAURI_ENDPOINT}/select_config_directory`,
-    async ({ request }) => {
-      const { defaultPath, default_path } = await withJson<{
-        defaultPath?: string;
-        default_path?: string;
-      }>(request);
-      const initial = defaultPath ?? default_path;
-      return success(initial ? `${initial}/picked` : "/mock/selected-dir");
-    },
-  ),
 
   http.post(`${TAURI_ENDPOINT}/pick_directory`, async ({ request }) => {
     const { defaultPath, default_path } = await withJson<{
@@ -514,8 +494,6 @@ export const handlers = [
   http.post(`${TAURI_ENDPOINT}/remove_from_failover_queue`, () =>
     success(true),
   ),
-  http.post(`${TAURI_ENDPOINT}/reorder_failover_queue`, () => success(true)),
-  http.post(`${TAURI_ENDPOINT}/set_failover_item_enabled`, () => success(true)),
 
   http.post(`${TAURI_ENDPOINT}/get_provider_health`, () =>
     success({

@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 
+use crate::error::AppError;
 use tauri::{AppHandle, Emitter};
 
 /// 应用更新下载进度（通过 `update-download-progress` 事件发给前端）。
@@ -107,7 +108,7 @@ pub async fn save_settings(
     // Unrelated settings must remain editable if a configured source disappears.
     if shared_instruction_file_changed && instruction_dirs_changed {
         let source = merged.shared_instruction_file.clone();
-        crate::settings::update_general_settings(merged).map_err(|e| e.to_string())?;
+        crate::settings::update_general_settings(merged)?;
         if let Err(error) = crate::shared_instructions::sync_with_source_for_state(
             state.inner(),
             source.as_deref(),
@@ -124,10 +125,9 @@ pub async fn save_settings(
             state.inner(),
             source.as_deref(),
             || crate::settings::update_general_settings(merged),
-        )
-        .map_err(|error| error.to_string())?;
+        )?;
     } else {
-        crate::settings::update_general_settings(merged).map_err(|e| e.to_string())?;
+        crate::settings::update_general_settings(merged)?;
     }
 
     // 原生托盘菜单 / 托盘面板当场切换，不用重启。
@@ -289,7 +289,7 @@ pub async fn has_codex_unify_history_backup() -> Result<bool, String> {
 /// （这时「经典子 agent 工具」开关不生效，界面上提示）。
 #[tauri::command]
 pub async fn codex_forces_multi_agent_v2() -> Result<bool, String> {
-    let text = crate::codex_config::read_codex_config_text().map_err(|e| e.to_string())?;
+    let text = crate::codex_config::read_codex_config_text()?;
     Ok(crate::codex_config::codex_config_forces_multi_agent_v2(
         &text,
     ))
@@ -297,8 +297,8 @@ pub async fn codex_forces_multi_agent_v2() -> Result<bool, String> {
 
 /// Codex 会话压缩开关（`[features] local_thread_store_compression`）当前是否开启。
 #[tauri::command]
-pub async fn get_codex_session_compression() -> Result<bool, String> {
-    crate::services::codex_session_compression::is_enabled().map_err(|e| e.to_string())
+pub async fn get_codex_session_compression() -> Result<bool, AppError> {
+    crate::services::codex_session_compression::is_enabled()
 }
 
 /// 开关 Codex 会话压缩，返回写入后的状态。
@@ -308,12 +308,11 @@ pub async fn set_codex_session_compression(
     enabled: bool,
 ) -> Result<bool, String> {
     let db = state.db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
+    Ok(tauri::async_runtime::spawn_blocking(move || {
         crate::services::codex_session_compression::set_enabled(&db, enabled)
     })
     .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())??)
 }
 
 /// Codex 会话目录（sessions + archived_sessions）当前占用的字节数。
@@ -334,8 +333,7 @@ pub async fn restore_codex_unified_history() -> Result<CodexUnifyHistoryRestoreR
         crate::codex_history_migration::restore_codex_official_history_from_backups()
     })
     .await
-    .map_err(|e| e.to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())??;
 
     if let Some(reason) = &outcome.skipped_reason {
         log::debug!("○ Codex official history restore skipped: {reason}");
@@ -938,8 +936,8 @@ mod tests {
 #[tauri::command]
 pub async fn get_rectifier_config(
     state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::RectifierConfig, String> {
-    state.db.get_rectifier_config().map_err(|e| e.to_string())
+) -> Result<crate::proxy::types::RectifierConfig, AppError> {
+    state.db.get_rectifier_config()
 }
 
 #[tauri::command]
@@ -947,18 +945,15 @@ pub async fn set_rectifier_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::RectifierConfig,
 ) -> Result<bool, String> {
-    state
-        .db
-        .set_rectifier_config(&config)
-        .map_err(|e| e.to_string())?;
+    state.db.set_rectifier_config(&config)?;
     Ok(true)
 }
 
 #[tauri::command]
 pub async fn get_optimizer_config(
     state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::OptimizerConfig, String> {
-    state.db.get_optimizer_config().map_err(|e| e.to_string())
+) -> Result<crate::proxy::types::OptimizerConfig, AppError> {
+    state.db.get_optimizer_config()
 }
 
 #[tauri::command]
@@ -966,21 +961,15 @@ pub async fn set_optimizer_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::OptimizerConfig,
 ) -> Result<bool, String> {
-    state
-        .db
-        .set_optimizer_config(&config)
-        .map_err(|e| e.to_string())?;
+    state.db.set_optimizer_config(&config)?;
     Ok(true)
 }
 
 #[tauri::command]
 pub async fn get_privacy_filter_config(
     state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::PrivacyFilterConfig, String> {
-    state
-        .db
-        .get_privacy_filter_config()
-        .map_err(|e| e.to_string())
+) -> Result<crate::proxy::types::PrivacyFilterConfig, AppError> {
+    state.db.get_privacy_filter_config()
 }
 
 #[tauri::command]
@@ -988,10 +977,7 @@ pub async fn set_privacy_filter_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::PrivacyFilterConfig,
 ) -> Result<bool, String> {
-    state
-        .db
-        .set_privacy_filter_config(&config)
-        .map_err(|e| e.to_string())?;
+    state.db.set_privacy_filter_config(&config)?;
     if config.enabled {
         // 规则编译有一次性耗时，开关打开时在后台预热，不压到第一个请求上
         std::thread::spawn(crate::proxy::privacy_filter::warm_up);
@@ -1002,8 +988,8 @@ pub async fn set_privacy_filter_config(
 #[tauri::command]
 pub async fn get_log_config(
     state: tauri::State<'_, crate::AppState>,
-) -> Result<crate::proxy::types::LogConfig, String> {
-    state.db.get_log_config().map_err(|e| e.to_string())
+) -> Result<crate::proxy::types::LogConfig, AppError> {
+    state.db.get_log_config()
 }
 
 #[tauri::command]
@@ -1011,10 +997,7 @@ pub async fn set_log_config(
     state: tauri::State<'_, crate::AppState>,
     config: crate::proxy::types::LogConfig,
 ) -> Result<bool, String> {
-    state
-        .db
-        .set_log_config(&config)
-        .map_err(|e| e.to_string())?;
+    state.db.set_log_config(&config)?;
     log::set_max_level(config.to_level_filter());
     log::info!(
         "日志配置已更新: enabled={}, level={}",

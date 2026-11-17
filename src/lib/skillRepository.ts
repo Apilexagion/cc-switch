@@ -1,23 +1,62 @@
+import { parseRepoUrl as parseHostedRepo } from "@/components/skills/repoUrl";
+
 export interface SkillRepositoryRef {
   owner: string;
   name: string;
   repoUrl?: string;
+  host?: string;
 }
 
 export const skillRepositoryUrl = (repo: SkillRepositoryRef) =>
-  repo.repoUrl ?? `https://github.com/${repo.owner}/${repo.name}`;
+  repo.repoUrl ??
+  `https://${repo.host || "github.com"}/${repo.owner}/${repo.name}`;
 
 /** Missing source means GitHub, preserving existing keys and persisted caches. */
 export const skillRepositoryKey = (repo: SkillRepositoryRef) =>
-  repo.repoUrl ?? `${repo.owner}/${repo.name}`.toLowerCase();
+  repo.repoUrl ??
+  `${repo.host && repo.host !== "github.com" ? `${repo.host}/` : ""}${repo.owner}/${repo.name}`.toLowerCase();
 
 export const skillRepositoryLabel = (repo: SkillRepositoryRef) =>
-  repo.repoUrl?.replace(/^https:\/\//, "") ?? `${repo.owner}/${repo.name}`;
+  repo.repoUrl?.replace(/^https:\/\//, "") ??
+  `${repo.host && repo.host !== "github.com" ? `${repo.host}/` : ""}${repo.owner}/${repo.name}`;
 
 /** Only repository roots: never accept embedded credentials, refs or query URLs. */
 export function parseSkillRepositoryUrl(
   value: string,
+  provider: "auto" | "gitlab" | "forgejo" = "auto",
 ): SkillRepositoryRef | null {
+  const trimmed = value.trim();
+  // Validate before URL normalization can erase dot segments or credentials.
+  if (
+    /[\\%\x00-\x20\x7f]/.test(trimmed) ||
+    trimmed.split("/").some((part) => part === "." || part === "..")
+  )
+    return null;
+  if (/^[a-z]+:\/\//i.test(trimmed)) {
+    try {
+      const url = new URL(trimmed);
+      const ssh = url.protocol === "ssh:";
+      if (
+        (!ssh && url.protocol !== "https:") ||
+        url.password ||
+        url.search ||
+        url.hash ||
+        (url.username && !(ssh && url.username === "git"))
+      )
+        return null;
+    } catch {
+      return null;
+    }
+  }
+  if (
+    provider === "gitlab" ||
+    (provider === "auto" &&
+      (trimmed.includes("gitlab") ||
+        /\/-\//.test(trimmed) ||
+        /^(?:git@|ssh:\/\/)/i.test(trimmed)))
+  ) {
+    return parseHostedRepo(trimmed);
+  }
   let raw = value
     .trim()
     .replace(/\/+$/, "")

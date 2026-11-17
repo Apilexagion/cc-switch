@@ -149,7 +149,8 @@ impl Database {
             enabled_hermes BOOLEAN NOT NULL DEFAULT 0,
             installed_at INTEGER NOT NULL DEFAULT 0,
             content_hash TEXT,
-            updated_at INTEGER NOT NULL DEFAULT 0
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            repo_host TEXT
         )",
             [],
         )
@@ -160,7 +161,8 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS skill_repos (
             owner TEXT NOT NULL, name TEXT NOT NULL, branch TEXT NOT NULL DEFAULT 'main',
             enabled BOOLEAN NOT NULL DEFAULT 1, repo_url TEXT NOT NULL DEFAULT '',
-            PRIMARY KEY (repo_url, owner, name)
+            host TEXT NOT NULL DEFAULT 'github.com',
+            PRIMARY KEY (host, repo_url, owner, name)
         )",
             [],
         )
@@ -2040,6 +2042,59 @@ impl Database {
     /// 「no such column」；而已经停在最新版本的库不会再触发任何迁移，光修
     /// v13→v14 也救不回来。所以放在迁移收尾按幂等方式重新确认一遍。
     fn ensure_fork_owned_columns(conn: &Connection) -> Result<(), AppError> {
+        if Self::table_exists(conn, "skills")? {
+            Self::add_column_if_missing(conn, "skills", "repo_url", "TEXT")?;
+            Self::add_column_if_missing(conn, "skills", "repo_host", "TEXT")?;
+        }
+        if Self::table_exists(conn, "skill_repos")? {
+            Self::add_column_if_missing(
+                conn,
+                "skill_repos",
+                "repo_url",
+                "TEXT NOT NULL DEFAULT ''",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "skill_repos",
+                "host",
+                "TEXT NOT NULL DEFAULT 'github.com'",
+            )?;
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(skill_repos)")
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let columns = stmt
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+                })
+                .map_err(|e| AppError::Database(e.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|e| AppError::Database(e.to_string()))?;
+            let mut primary: Vec<_> = columns
+                .into_iter()
+                .filter(|(_, order)| *order > 0)
+                .collect();
+            primary.sort_by_key(|(_, order)| *order);
+            if primary
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                != ["host", "repo_url", "owner", "name"]
+            {
+                drop(stmt);
+                conn.execute_batch(
+                    "ALTER TABLE skill_repos RENAME TO skill_repos_source_legacy;
+                     CREATE TABLE skill_repos (
+                         owner TEXT NOT NULL, name TEXT NOT NULL,
+                         branch TEXT NOT NULL DEFAULT 'main', enabled BOOLEAN NOT NULL DEFAULT 1,
+                         repo_url TEXT NOT NULL DEFAULT '', host TEXT NOT NULL DEFAULT 'github.com',
+                         PRIMARY KEY (host, repo_url, owner, name));
+                     INSERT INTO skill_repos(owner,name,branch,enabled,repo_url,host)
+                         SELECT owner,name,branch,enabled,COALESCE(repo_url,''),COALESCE(host,'github.com')
+                         FROM skill_repos_source_legacy;
+                     DROP TABLE skill_repos_source_legacy;"
+                ).map_err(|e| AppError::Database(e.to_string()))?;
+            }
+        }
         for table in ["mcp_servers", "skills"] {
             if Self::table_exists(conn, table)? {
                 Self::add_column_if_missing(
@@ -4582,6 +4637,65 @@ mod tests {
             "the rebuild must carry the user's takeover flag, not reset it to the default"
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn v27_skill_sources_reconcile_fork_and_upstream_without_losing_rows() -> Result<(), AppError> {
+        for (column, key, source) in [
+            (
+                "repo_url",
+                "repo_url, owner, name",
+                "https://codeberg.org/owner/repo",
+            ),
+            ("host", "owner, name", "gitlab.example.com:8443"),
+        ] {
+            let conn = Connection::open_in_memory()?;
+            Database::create_tables_on_conn(&conn)?;
+            conn.execute_batch(&format!(
+                "DROP TABLE skill_repos;
+                 CREATE TABLE skill_repos (
+                    owner TEXT NOT NULL, name TEXT NOT NULL, branch TEXT NOT NULL,
+                    enabled BOOLEAN NOT NULL, {column} TEXT NOT NULL,
+                    PRIMARY KEY ({key}));"
+            ))?;
+            conn.execute(&format!(
+                "INSERT INTO skill_repos(owner,name,branch,enabled,{column}) VALUES ('owner','repo','trunk',0,?1)"
+            ), [source])?;
+            Database::set_user_version(&conn, 27)?;
+            for _ in 0..2 {
+                Database::apply_schema_migrations_on_conn(&conn)?;
+            }
+            let row = conn.query_row(
+                "SELECT branch,enabled,repo_url,host FROM skill_repos",
+                [],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, bool>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                    ))
+                },
+            )?;
+            assert_eq!((&*row.0, row.1), ("trunk", false));
+            assert_eq!(row.2, if column == "repo_url" { source } else { "" });
+            assert_eq!(
+                row.3,
+                if column == "host" {
+                    source
+                } else {
+                    "github.com"
+                }
+            );
+            conn.execute(
+                "INSERT INTO skill_repos(owner,name,repo_url,host) VALUES ('owner','repo','','other.example:9443')", []
+            )?;
+            Database::apply_schema_migrations_on_conn(&conn)?;
+            let count: i64 =
+                conn.query_row("SELECT COUNT(*) FROM skill_repos", [], |row| row.get(0))?;
+            assert_eq!(count, 2);
+        }
         Ok(())
     }
 

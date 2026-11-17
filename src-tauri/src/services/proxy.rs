@@ -104,7 +104,7 @@ impl ProxyService {
         // 2. 获取配置
         let config = self
             .db
-            .get_proxy_config()
+            .get_listen_config()
             .await
             .map_err(|e| format!("获取代理配置失败: {e}"))?;
 
@@ -180,9 +180,6 @@ impl ProxyService {
             gemini,
             grokbuild,
             claude_desktop,
-            // OpenCode and OpenClaw don't support proxy features
-            opencode: false,
-            openclaw: false,
         })
     }
 
@@ -235,7 +232,7 @@ impl ProxyService {
     pub(crate) async fn build_proxy_urls(&self) -> Result<(String, String), String> {
         let config = self
             .db
-            .get_proxy_config()
+            .get_listen_config()
             .await
             .map_err(|e| format!("获取代理配置失败: {e}"))?;
 
@@ -437,7 +434,7 @@ impl ProxyService {
     /// 读取代理配置，供搜索 MCP 在服务未运行时显示配置端点。
     pub async fn get_config(&self) -> Result<ProxyConfig, String> {
         self.db
-            .get_proxy_config()
+            .get_listen_config()
             .await
             .map_err(|e| format!("获取代理配置失败: {e}"))
     }
@@ -477,7 +474,7 @@ impl ProxyService {
         }
         let new_config = self
             .db
-            .get_proxy_config()
+            .get_listen_config()
             .await
             .map_err(|e| format!("获取代理配置失败: {e}"))?;
 
@@ -537,7 +534,7 @@ impl ProxyService {
             .map_err(|e| format!("恢复原代理配置失败: {e}"))?;
         let config = self
             .db
-            .get_proxy_config()
+            .get_listen_config()
             .await
             .map_err(|e| format!("获取代理配置失败: {e}"))?;
         self.start_with(&config).await
@@ -605,7 +602,7 @@ mod tests {
         let db = Arc::new(Database::memory().unwrap());
         let configs = seed_distinct_app_proxy_configs(&db).await;
         let service = ProxyService::new(db.clone());
-        let mut config = db.get_proxy_config().await.unwrap();
+        let mut config = db.get_listen_config().await.unwrap();
         config.listen_port = 0;
         let mut expected_global = db.get_global_proxy_config().await.unwrap();
         expected_global.listen_port = 23456;

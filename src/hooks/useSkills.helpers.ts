@@ -38,12 +38,18 @@ export function replaceRepoDiscovery(
 ): SkillDiscoveryResult | undefined {
   if (!existing) return undefined;
 
-  const otherRepo = (owner: string, name: string, repoUrl?: string) =>
-    skillRepositoryKey({ owner, name, repoUrl }) !== skillRepositoryKey(repo);
+  const otherRepo = (
+    owner: string,
+    name: string,
+    repoUrl?: string,
+    host?: string,
+  ) =>
+    skillRepositoryKey({ owner, name, repoUrl, host }) !==
+    skillRepositoryKey(repo);
   const seen = new Set<string>();
   const skills = [
     ...existing.skills.filter((s) =>
-      otherRepo(s.repoOwner, s.repoName, s.repoUrl),
+      otherRepo(s.repoOwner, s.repoName, s.repoUrl, s.repoHost),
     ),
     ...(next?.skills ?? []),
   ]
@@ -59,7 +65,9 @@ export function replaceRepoDiscovery(
       return x < y ? -1 : x > y ? 1 : 0;
     });
   const failures = [
-    ...existing.failures.filter((f) => otherRepo(f.owner, f.name, f.repoUrl)),
+    ...existing.failures.filter((f) =>
+      otherRepo(f.owner, f.name, f.repoUrl, f.host),
+    ),
     ...(next?.failures ?? []),
   ];
   return { skills, failures };

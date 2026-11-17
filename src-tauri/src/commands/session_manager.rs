@@ -298,7 +298,7 @@ pub async fn export_session_markdown<R: tauri::Runtime>(
     let path = picked
         .into_path()
         .map_err(|e| format!("无效的保存路径: {e}"))?;
-    crate::config::write_text_file(&path, &content).map_err(|e| e.to_string())?;
+    crate::config::write_text_file(&path, &content)?;
     Ok(Some(path.to_string_lossy().into_owned()))
 }
 

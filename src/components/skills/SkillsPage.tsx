@@ -47,6 +47,7 @@ import { MatrixSearch } from "@/components/mcp/AppMatrix";
 import { CHECKBOX_CLASS } from "@/components/mcp/formBits";
 import { countRepoSkills } from "./RepoManagerPanel";
 import { describeRepoFailures, repoFailureKey } from "./repoFailures";
+import { GITHUB_HOST, repoWebUrl } from "./repoUrl";
 import { APP_IDS_WITH } from "@/config/appSpecs";
 
 /** 发现列表每行高度（h-14），虚拟化按这个算 */
@@ -83,12 +84,18 @@ export function useSkillRepoActions() {
     );
   };
 
-  const removeRepo = async (owner: string, name: string, repoUrl?: string) => {
+  const removeRepo = async (
+    owner: string,
+    name: string,
+    repoUrl?: string,
+    host?: string,
+  ) => {
     try {
       await removeRepoMutation.mutateAsync({
         owner,
         name,
         ...(repoUrl ? { repoUrl } : {}),
+        ...(host ? { host } : {}),
       });
       toast.success(t("skills.repo.removeSuccess", { owner, name }), {
         closeButton: true,
@@ -147,19 +154,29 @@ function discoverDocsUrl(row: DiscoverRow): string | undefined {
   if (row.skill.readmeUrl) return row.skill.readmeUrl;
   if (row.skill.repoUrl) return row.skill.repoUrl;
   if (row.repoOwner && row.repoName) {
-    return `https://github.com/${row.repoOwner}/${row.repoName}`;
+    return repoWebUrl({
+      host: row.skill.repoHost,
+      owner: row.repoOwner,
+      name: row.repoName,
+    });
   }
   return undefined;
 }
 
+/**
+ * 主机也算进去：仓库只按 owner/name 定位，同一路径换了主机（GitHub → GitLab）后，
+ * 之前装的那个不是同一个技能。后端把这种情况当目录冲突，这里对不上键就会落到
+ * `installedByDir` 给出同样的「目录被占用」。
+ */
 function installedKey(
   directory: string,
   owner?: string,
   name?: string,
   repoUrl?: string,
+  host?: string,
 ) {
   const dir = directory.split(/[/\\]/).pop()?.toLowerCase() ?? "";
-  const legacy = `${dir}:${(owner ?? "").toLowerCase()}:${(name ?? "").toLowerCase()}`;
+  const legacy = `${host || GITHUB_HOST}:${dir}:${(owner ?? "").toLowerCase()}:${(name ?? "").toLowerCase()}`;
   return repoUrl ? `${legacy}:${repoUrl}` : legacy;
 }
 
@@ -275,6 +292,7 @@ export function SkillsPage({
           skill.repoOwner,
           skill.repoName,
           skill.repoUrl,
+          skill.repoHost,
         ),
         skill,
       );
@@ -344,7 +362,13 @@ export function SkillsPage({
 
   const statusOf = (row: DiscoverRow) => {
     const installed = installedByKey.get(
-      installedKey(row.directory, row.repoOwner, row.repoName, row.repoUrl),
+      installedKey(
+        row.directory,
+        row.repoOwner,
+        row.repoName,
+        row.repoUrl,
+        row.skill.repoHost,
+      ),
     );
     if (installed) return { kind: "installed" as const, skill: installed };
     const dir = row.directory.split(/[/\\]/).pop()?.toLowerCase() ?? "";

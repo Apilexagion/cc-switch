@@ -25,6 +25,7 @@ import {
   MONO_FIELD_CLASS,
 } from "@/components/mcp/formBits";
 import { repoFailureKey } from "./repoFailures";
+import { GITHUB_HOST, isInsecureRepoUrl } from "./repoUrl";
 import {
   parseSkillRepositoryUrl,
   skillRepositoryKey,
@@ -39,7 +40,12 @@ interface RepoManagerPanelProps {
   /** 本次发现没读到的仓库：显示「读取失败」而不是「识别到 0 个」 */
   failures?: SkillRepoFailure[];
   onAdd: (repo: SkillRepo) => Promise<void>;
-  onRemove: (owner: string, name: string, repoUrl?: string) => Promise<void>;
+  onRemove: (
+    owner: string,
+    name: string,
+    repoUrl?: string,
+    host?: string,
+  ) => Promise<void>;
   /** 勾掉 = 停用（不参与发现），不删除 */
   onToggle?: (repo: SkillRepo, enabled: boolean) => Promise<void>;
   onClose: () => void;
@@ -73,6 +79,7 @@ export function countRepoSkills(skills: DiscoverableSkill[], repo: SkillRepo) {
     (skill) =>
       skill.repoOwner === repo.owner &&
       skill.repoName === repo.name &&
+      (skill.repoHost || GITHUB_HOST) === (repo.host || GITHUB_HOST) &&
       (skill.repoUrl ?? "") === (repo.repoUrl ?? "") &&
       (repo.repoUrl && (!repo.branch || repo.branch.toUpperCase() === "HEAD")
         ? true
@@ -95,13 +102,20 @@ export function RepoManagerPanel({
     failures.map((failure) => [repoFailureKey(failure), failure]),
   );
   const [repoUrl, setRepoUrl] = useState("");
+  const [provider, setProvider] = useState<"auto" | "gitlab" | "forgejo">(
+    "auto",
+  );
   const [branch, setBranch] = useState("");
   const [error, setError] = useState("");
   const [adding, setAdding] = useState(false);
 
   const handleAdd = async () => {
     setError("");
-    const parsed = parseRepoUrl(repoUrl);
+    if (isInsecureRepoUrl(repoUrl)) {
+      setError(t("skills.repo.httpsOnly"));
+      return;
+    }
+    const parsed = parseSkillRepositoryUrl(repoUrl, provider);
     if (!parsed) {
       setError(t("skills.repo.invalidUrl"));
       return;
@@ -171,6 +185,23 @@ export function RepoManagerPanel({
                   if (event.key === "Enter") void handleAdd();
                 }}
               />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="sk-repo-provider" className={LABEL_CLASS}>
+                {t("skills.repo.provider")}
+              </label>
+              <select
+                id="sk-repo-provider"
+                className={MONO_FIELD_CLASS}
+                value={provider}
+                onChange={(event) =>
+                  setProvider(event.target.value as typeof provider)
+                }
+              >
+                <option value="auto">{t("skills.repo.providerAuto")}</option>
+                <option value="gitlab">GitLab</option>
+                <option value="forgejo">Forgejo / Codeberg</option>
+              </select>
             </div>
             <div className="flex flex-col gap-1.5">
               <label htmlFor="sk-repo-branch" className={LABEL_CLASS}>
@@ -249,6 +280,9 @@ export function RepoManagerPanel({
                           {id}
                         </span>
                         <span className="text-caption text-fg-2">
+                          {repo.host && repo.host !== GITHUB_HOST
+                            ? `${repo.host} · `
+                            : ""}
                           {repo.branch || "main"}
                           {" · "}
                           {!repo.enabled ? (
@@ -290,9 +324,16 @@ export function RepoManagerPanel({
                           })}
                           className="hover:text-danger-text"
                           onClick={() =>
-                            void (repo.repoUrl
-                              ? onRemove(repo.owner, repo.name, repo.repoUrl)
-                              : onRemove(repo.owner, repo.name))
+                            void (repo.host && repo.host !== GITHUB_HOST
+                              ? onRemove(
+                                  repo.owner,
+                                  repo.name,
+                                  repo.repoUrl,
+                                  repo.host,
+                                )
+                              : repo.repoUrl
+                                ? onRemove(repo.owner, repo.name, repo.repoUrl)
+                                : onRemove(repo.owner, repo.name))
                           }
                         >
                           <Trash2 className="h-4 w-4" strokeWidth={1.5} />

@@ -8,38 +8,15 @@
 use serde_json::{json, Value};
 use std::collections::HashMap;
 
-use crate::app_config::{McpApps, McpConfig, McpServer, MultiAppConfig};
+use crate::app_config::{McpApps, McpServer, MultiAppConfig};
 use crate::error::AppError;
 
-use super::validation::{extract_server_spec, spec_transport_type, validate_server_spec};
+use super::validation::{spec_transport_type, validate_server_spec};
 
 fn should_sync_codex_mcp() -> bool {
     // Codex 未安装/未初始化时：~/.codex 目录不存在。
     // 按用户偏好：目录缺失时跳过写入/删除，不创建任何文件或目录。
     crate::codex_config::get_codex_config_dir().exists()
-}
-
-/// 返回已启用的 MCP 服务器（过滤 enabled==true）
-fn collect_enabled_servers(cfg: &McpConfig) -> HashMap<String, Value> {
-    let mut out = HashMap::new();
-    for (id, entry) in cfg.servers.iter() {
-        let enabled = entry
-            .get("enabled")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        if !enabled {
-            continue;
-        }
-        match extract_server_spec(entry) {
-            Ok(spec) => {
-                out.insert(id.clone(), spec);
-            }
-            Err(err) => {
-                log::warn!("跳过无效的 MCP 条目 '{id}': {err}");
-            }
-        }
-    }
-    out
 }
 
 /// 推断 Codex `[mcp_servers.*]` 条目的传输类型。
@@ -297,39 +274,12 @@ pub fn import_from_codex(config: &mut MultiAppConfig) -> Result<usize, AppError>
     Ok(changed_total)
 }
 
-/// 将 config.json 中 Codex 的 enabled==true 项以 TOML 形式写入 ~/.codex/config.toml
-///
-/// 格式策略：
-/// - 唯一正确格式：[mcp_servers] 顶层表（Codex 官方标准）
-/// - 自动清理错误格式：[mcp.servers]（如果存在）
-/// - 读取现有 config.toml；若语法无效则报错，不尝试覆盖
-/// - 仅更新 `mcp_servers` 表，保留其它键
-/// - 仅写入启用项；无启用项时清理 mcp_servers 表
-pub fn sync_enabled_to_codex(config: &MultiAppConfig) -> Result<(), AppError> {
-    if !should_sync_codex_mcp() {
-        return Ok(());
-    }
-
-    // 1) 收集启用项（Codex 维度）
-    let enabled = collect_enabled_servers(&config.mcp.codex);
-
-    // 2) 读取现有 config.toml 文本；保持无效 TOML 的错误返回（不覆盖文件）
-    let base_text = crate::codex_config::read_and_validate_codex_config_text()?;
-    let new_text = sync_enabled_servers_to_codex_config_text(&base_text, &enabled)?;
-
-    // 6) 写回（仅改 TOML，不触碰 auth.json）；toml_edit 会尽量保留未改区域的注释/空白/顺序
-    crate::config::write_text_file_private(
-        &crate::codex_config::get_codex_config_path(),
-        &new_text,
-    )?;
-    Ok(())
-}
-
 /// 将已计算好的 Codex MCP 服务器集合写入 config.toml 文本。
 ///
 /// `enabled` 的 value 是 MCP server spec（不是带 enabled/server 包装的 UI entry）。
 /// 此函数只替换 `[mcp_servers]` 段并清理旧的 `[mcp.servers]` 错误格式，
 /// 其它 Codex 配置保持不变，并清理已退役的配置键。
+#[cfg(test)]
 pub fn sync_enabled_servers_to_codex_config_text(
     base_text: &str,
     enabled: &HashMap<String, Value>,
@@ -454,11 +404,7 @@ fn remove_mcp_server_from_doc(doc: &mut toml_edit::DocumentMut, id: &str) {
     }
 }
 
-pub fn sync_single_server_to_codex(
-    _config: &MultiAppConfig,
-    id: &str,
-    server_spec: &Value,
-) -> Result<(), AppError> {
+pub fn sync_single_server_to_codex(id: &str, server_spec: &Value) -> Result<(), AppError> {
     if !should_sync_codex_mcp() {
         return Ok(());
     }

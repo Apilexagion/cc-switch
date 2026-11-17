@@ -3,9 +3,9 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use once_cell::sync::Lazy;
 use regex::Regex;
 use serde_json::{json, Value};
+use std::sync::LazyLock as Lazy;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

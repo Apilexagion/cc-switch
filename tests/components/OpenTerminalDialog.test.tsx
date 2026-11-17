@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import {
   OpenTerminalDialog,
   terminalAvailable,
@@ -11,6 +11,7 @@ import {
   AGY_CURRENT_SCOPE_KEY,
   agyCurrentQuotaKey,
 } from "@/lib/query/agyCurrentQuota";
+import { createTestQueryClient } from "../utils/testQueryClient";
 
 const openTerminalMock = vi.fn();
 const pickDirectoryMock = vi.fn();
@@ -54,7 +55,7 @@ function renderDialog(
   onClose = vi.fn(),
   target: Provider = provider,
   appId: "claude" | "codex" | "agy" | "grokbuild" | "copilot" = "claude",
-  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+  client = createTestQueryClient(),
 ) {
   render(
     <QueryClientProvider client={client}>
@@ -121,9 +122,7 @@ describe("OpenTerminalDialog", () => {
   it.each(["loading", "error"] as const)(
     "warns about the bound global login even when status is %s",
     async (state) => {
-      const client = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      });
+      const client = createTestQueryClient();
       if (state === "loading")
         agyStatusMock.mockImplementation(() => new Promise(() => {}));
       else agyStatusMock.mockRejectedValue(new Error("status unavailable"));
@@ -147,9 +146,7 @@ describe("OpenTerminalDialog", () => {
   it.each([false, true])(
     "clears old current-account quota after a bound launch (terminal failure=%s)",
     async (fails) => {
-      const client = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      });
+      const client = createTestQueryClient();
       client.setQueryData(AGY_CURRENT_SCOPE_KEY, 0);
       client.setQueryData(agyCurrentQuotaKey(0), {
         success: true,

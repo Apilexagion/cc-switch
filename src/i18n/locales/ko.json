@@ -25,7 +25,6 @@
     "success": "성공",
     "error": "오류",
     "unknown": "알 수 없음",
-    "enterValidValue": "유효한 값을 입력하세요.",
     "clear": "지우기",
     "format": "포맷팅",
     "formatSuccess": "포맷팅이 완료되었습니다",
@@ -142,7 +141,6 @@
     "adoptCatalog": "CC Switch 모델 카탈로그 사용",
     "adoptCatalogDone": "이제 CC Switch의 모델 카탈로그를 사용하고 있습니다. 적용하려면 Codex를 다시 시작하세요.",
     "adoptCatalogFailed": "CC Switch의 모델 카탈로그로 전환하지 못했습니다: {{error}}",
-    "noRoutingSupport": "라우팅 지원 없음",
     "blockedByProxyHint": "라우팅 모드에서는 공식 공급자로 전환할 수 없습니다.",
     "editProvider": "공급자 편집",
     "editProviderHint": "업데이트 후 즉시 현재 공급자에 설정이 적용됩니다.",
@@ -190,6 +188,7 @@
       "description": "선택한 폴더에서 터미널을 열고 \"{{name}}\"의 설정으로 {{app}} 실행을 시작합니다. 보통 프로젝트 폴더를 선택하면 됩니다.",
       "isolationTitle": "이 터미널은 별도로 격리되어 있습니다",
       "isolationBody": "이 터미널은 ‘{{name}}’ 설정을 계속 사용합니다. 이후 CC Switch에서 공급자를 전환해도 영향을 받지 않으며, CC Switch에서 현재 사용 중인 공급자도 바꾸지 않습니다.",
+      "isolationBodyAgy": "The key and endpoint of \"{{name}}\" are used only for agy in this terminal, not saved to Antigravity settings or a persistent launcher. macOS/Linux briefly use a 0600 temporary environment file, deleted after reading. Running agy directly in another terminal still uses your Google sign-in.",
       "noDir": "선택한 폴더가 없습니다.",
       "choose": "폴더 선택…",
       "change": "변경…",
@@ -203,8 +202,7 @@
       "skipPermissions": "권한 확인 건너뛰기",
       "extraArgs": "추가 인수(선택 사항)",
       "extraArgsPlaceholder": "예: --debug --append-system-prompt \"간결하게 답변하세요\"",
-      "extraArgsHint": "실행 명령 뒤에 추가되며, 이번에 여는 터미널에만 적용됩니다. 인수는 공백으로 구분하고, 공백이 포함된 값은 따옴표로 묶으세요.",
-      "isolationBodyAgy": "The key and endpoint of \"{{name}}\" are used only for agy in this terminal, not saved to Antigravity settings or a persistent launcher. macOS/Linux briefly use a 0600 temporary environment file, deleted after reading. Running agy directly in another terminal still uses your Google sign-in."
+      "extraArgsHint": "실행 명령 뒤에 추가되며, 이번에 여는 터미널에만 적용됩니다. 인수는 공백으로 구분하고, 공백이 포함된 값은 따옴표로 묶으세요."
     },
     "name": "이름",
     "namePlaceholder": "예: Claude 공식",
@@ -225,13 +223,13 @@
         "modelHelp": "모델 목록에 표시되는 이름을 입력하세요. ‘모델 목록 가져오기’를 눌러 선택할 수 있습니다. 해당 세션에만 적용됩니다.",
         "keyFieldsHint": "모델, API 키 및 엔드포인트는 ‘터미널 열기’ 실행 시에만 사용되며 Antigravity 자체 설정에는 저장하지 않습니다.",
         "envFile": "실행 환경 변수",
+        "envFileHint": "Only the API key and endpoint are passed to the agy session opened from this card, not saved to native settings or a persistent launcher. macOS/Linux briefly use a 0600 temporary environment file, deleted after reading. Other environment variables are not applied.",
         "configJson": "모델 설정(CC Switch 형식)",
         "configJsonHint": "여기서는 모델 설정만 지원합니다. 다른 Antigravity 옵션은 agy에서 변경하고 MCP는 MCP 패널에서 관리하세요.",
         "account": "계정",
         "accountFollow": "agy의 현재 로그인 따르기",
         "accountMissing": "이 컴퓨터에 없는 계정",
-        "accountHelp": "계정을 선택하면 ‘터미널 열기’ 실행 전에 agy의 로그인을 해당 계정으로 전환합니다. 이는 전역적으로 적용되며 이후 시작한 agy 세션도 이 계정을 사용합니다. 계정은 인증 센터에서 추가하세요.",
-        "envFileHint": "Only the API key and endpoint are passed to the agy session opened from this card, not saved to native settings or a persistent launcher. macOS/Linux briefly use a 0600 temporary environment file, deleted after reading. Other environment variables are not applied."
+        "accountHelp": "계정을 선택하면 ‘터미널 열기’ 실행 전에 agy의 로그인을 해당 계정으로 전환합니다. 이는 전역적으로 적용되며 이후 시작한 agy 세션도 이 계정을 사용합니다. 계정은 인증 센터에서 추가하세요."
       },
       "gemini": {
         "model": "모델",
@@ -278,15 +276,19 @@
     "editCurrentNoticeFileEnd": "에 즉시 저장되며, 다음 요청부터 적용됩니다.",
     "editCurrentNotice": "사용 중인 공급자입니다. 저장하면 즉시 적용되며, 다음 요청부터 새 설정을 사용합니다.",
     "liveConfigReadFailed": "{{app}} 설정 파일을 읽을 수 없습니다",
-    "liveConfigReadFailedHint": "설정 파일의 문제를 해결하기 전까지는 공급자를 추가하거나 제거할 수 없습니다."
+    "liveConfigReadFailedHint": "설정 파일의 문제를 해결하기 전까지는 공급자를 추가하거나 제거할 수 없습니다.",
+    "codexToolStrip": {
+      "title": "Relay compatibility: remove built-in tools",
+      "selected": "enabled",
+      "description": "Codex CLI can add OpenAI built-in tools when using ChatGPT sign-in or plugins. Some relays reject these tools with a 403 error. Choose tools to remove from requests forwarded through the cc-switch proxy. Leaving all unchecked forwards them unchanged.",
+      "note": "These selections apply only when this provider uses the cc-switch proxy. They do not affect direct Codex CLI connections."
+    }
   },
   "claudeCode": {
-    "needsRouting": "라우팅 필요",
-    "noRoutingSupport": "라우팅 지원 없음"
+    "needsRouting": "라우팅 필요"
   },
   "codex": {
     "needsRouting": "라우팅 필요",
-    "noRoutingSupport": "라우팅 지원 없음",
     "officialRouting": "공식 계정 라우팅",
     "nativeLogin": "Codex 로그인",
     "followCodexLogin": "Codex에 로그인된 계정 사용",
@@ -343,8 +345,6 @@
   },
   "notifications": {
     "providerAdded": "공급자가 추가됨",
-    "providerSaved": "공급자 설정이 저장되었습니다.",
-    "providerDeleted": "공급자가 삭제되었습니다.",
     "switchSuccess": "전환 성공!",
     "codexRestartRequired": "성공적으로 전환되었습니다. 변경 사항을 적용하려면 클라이언트를 다시 시작하세요.",
     "geminiRestartRequired": "성공적으로 전환되었습니다. 변경 사항을 적용하려면 Gemini CLI를 다시 시작하세요.",
@@ -355,12 +355,9 @@
     "removeFromConfigFailed": "공급자를 제거할 수 없습니다.",
     "switchFailedTitle": "전환 실패",
     "switchFailed": "전환 실패: {{error}}",
-    "autoImported": "기존 설정에서 기본 공급자를 생성했습니다",
     "addFailed": "공급자 추가 실패: {{error}}",
     "saveFailed": "저장 실패: {{error}}",
     "saveFailedGeneric": "저장하지 못했습니다. 다시 시도해 주세요.",
-    "appliedToClaudePlugin": "Claude 플러그인에 적용",
-    "removedFromClaudePlugin": "Claude 플러그인에서 제거됨",
     "syncClaudePluginFailed": "Claude 플러그인 동기화 실패",
     "skipClaudeOnboardingFailed": "Claude Code 첫 실행 확인을 건너뛰지 못했습니다.",
     "clearClaudeOnboardingSkipFailed": "Claude Code 첫 실행 확인을 복원하지 못했습니다.",
@@ -379,8 +376,6 @@
     "proxyReasonDesktopMapping": "모델 매핑을 사용합니다 (Claude Desktop은 Claude 모델 이름만 허용)",
     "proxyReasonManagedOAuth": "관리형 OAuth 로그인을 사용합니다 (로컬 라우팅이 토큰을 주입)",
     "proxyReasonRoutingRequired": "요청 처리에 로컬 라우팅이 필요합니다",
-    "openAIFormatHint": "이 공급자는 OpenAI 호환 형식을 사용하며 라우팅 서비스를 활성화해야 합니다.",
-    "copilotProxyHint": "GitHub Copilot을 Claude 공급자로 사용하려면 항상 로컬 라우팅이 필요합니다. 현재 모델에 따라 Chat Completions 또는 Responses를 자동으로 선택합니다.",
     "openLinkFailed": "링크를 열지 못했습니다.",
     "openclawModelsRegistered": "모델이 /model 목록에 등록되었습니다.",
     "openclawDefaultModelSet": "기본 모델로 설정했습니다.",
@@ -945,6 +940,7 @@
       "saveFailed": "저장하지 못했습니다: {{error}}"
     },
     "preserveCodexOfficialAuthOnSwitch": "직접 연결 전환 시 공식 로그인 유지",
+    "preserveCodexOfficialAuthOnSwitchDescription": "Keep the official login on the next direct switch to a third-party provider. Proxy mode always keeps an existing native login. This setting does not sign you in.",
     "unifyCodexSessionHistory": "Codex 세션 기록 통합",
     "unifyCodexSessionHistoryDescription": "공식 구독도 타사 공급자와 동일한 custom 공급자 ID를 사용하여 모든 세션이 같은 그룹에 속하게 됩니다. 최신 Codex(데스크톱 26.1103 / CLI 0.167 이상)에서는 현재 공급자 그룹의 세션만 이어갈 수 있으며, 다른 그룹은 읽기 전용이 됩니다. CLI의 resume 목록에도 현재 그룹만 표시됩니다. 공식 공급자와 타사 공급자 사이를 자주 전환한다면 이 기능을 켜는 것이 좋습니다. 공식 세션을 공유 그룹으로 옮길 수 있으며(옮기기 전에 자동 백업), 기능을 끌 때 백업에서 복원할 수 있습니다. 주의: 다른 공급자에서 이전 세션을 이어갈 때 해당 백엔드가 세션의 encrypted_content 추론 내용을 복호화하지 못해 실패할 수 있습니다.",
     "codexStackClassicSubagents": "통합 모드에서 기존 서브에이전트 도구 사용",
@@ -1165,42 +1161,6 @@
     "data": {
       "location": "저장 위치"
     },
-    "searchMcp": {
-      "installFailed": "Search settings were saved, but adding to clients failed: {{error}}",
-      "quotaHint": "Quota lookup currently supports Tavily. Other sources or failed lookups are unknown, never treated as zero.",
-      "unknown": "Unknown",
-      "running": "Shared local proxy running",
-      "moveUp": "Move up",
-      "maxChars": "Maximum returned characters",
-      "saved": "Web search settings saved",
-      "clients": "Add to these clients’ MCP lists",
-      "unlimited": "Unlimited",
-      "dailyLimit": "Daily tool-call limit per gateway key, UTC (0 for unlimited)",
-      "keyNumber": "Key {{number}}",
-      "keys": "API keys",
-      "moveDown": "Move down",
-      "serviceUnavailable": "Search MCP enabled; proxy stopped",
-      "proxyStatusUnknown": "Shared local proxy status awaiting refresh",
-      "readQuota": "Check saved-key quotas",
-      "clearKeys": "Clear saved keys",
-      "timeout": "Total timeout (5–120 seconds)",
-      "backoff": "Deprioritize rejected or rate-limited keys temporarily",
-      "baseUrlLabel": "Search source URL",
-      "enabled": "Enable shared web search MCP",
-      "install": "Save and add to MCP",
-      "stopped": "Shared local proxy stopped",
-      "description": "Share web_search and web_fetch across clients, trying search sources in the order below. Off by default; existing client search stays available.",
-      "baseUrl": "Custom API base URL (blank for official endpoint)",
-      "serviceEnabled": "Search MCP enabled",
-      "serviceDisabled": "Search MCP disabled",
-      "keysPlaceholder": "{{count}} saved keys; leave blank to keep them, or enter comma-separated replacements",
-      "endpoint": "Shared MCP address",
-      "pendingEnabled": "The enable setting has unsaved changes. Save to apply.",
-      "orderedKeys": "Use keys in order (off for rotation)",
-      "instanceUrl": "SearXNG instance URL (required)",
-      "gatewayHint": "Search MCP shares the local proxy with model routing. A running proxy does not mean search is enabled; disabling search keeps model routing running. Saving with search enabled starts the proxy. LAN access needs a gateway key permitting web-search; page fetching excludes private networks."
-    },
-    "preserveCodexOfficialAuthOnSwitchDescription": "Keep the official login on the next direct switch to a third-party provider. Proxy mode always keeps an existing native login. This setting does not sign you in.",
     "ipDiagnostics": {
       "title": "IP 진단",
       "scope": "선택한 네트워크 경로의 출구 정보를 확인합니다. DNS나 브라우저 격리를 검증하거나 계정 제한을 예측하지 않습니다.",
@@ -1240,6 +1200,41 @@
         "invalidResponse": "서비스가 잘못된 데이터를 반환했습니다",
         "unavailable": "서비스에서 데이터를 제공할 수 없습니다"
       }
+    },
+    "searchMcp": {
+      "installFailed": "Search settings were saved, but adding to clients failed: {{error}}",
+      "quotaHint": "Quota lookup currently supports Tavily. Other sources or failed lookups are unknown, never treated as zero.",
+      "unknown": "Unknown",
+      "running": "Shared local proxy running",
+      "moveUp": "Move up",
+      "maxChars": "Maximum returned characters",
+      "saved": "Web search settings saved",
+      "clients": "Add to these clients’ MCP lists",
+      "unlimited": "Unlimited",
+      "dailyLimit": "Daily tool-call limit per gateway key, UTC (0 for unlimited)",
+      "keyNumber": "Key {{number}}",
+      "keys": "API keys",
+      "moveDown": "Move down",
+      "serviceUnavailable": "Search MCP enabled; proxy stopped",
+      "proxyStatusUnknown": "Shared local proxy status awaiting refresh",
+      "readQuota": "Check saved-key quotas",
+      "clearKeys": "Clear saved keys",
+      "timeout": "Total timeout (5–120 seconds)",
+      "backoff": "Deprioritize rejected or rate-limited keys temporarily",
+      "baseUrlLabel": "Search source URL",
+      "enabled": "Enable shared web search MCP",
+      "install": "Save and add to MCP",
+      "stopped": "Shared local proxy stopped",
+      "description": "Share web_search and web_fetch across clients, trying search sources in the order below. Off by default; existing client search stays available.",
+      "baseUrl": "Custom API base URL (blank for official endpoint)",
+      "serviceEnabled": "Search MCP enabled",
+      "serviceDisabled": "Search MCP disabled",
+      "keysPlaceholder": "{{count}} saved keys; leave blank to keep them, or enter comma-separated replacements",
+      "endpoint": "Shared MCP address",
+      "pendingEnabled": "The enable setting has unsaved changes. Save to apply.",
+      "orderedKeys": "Use keys in order (off for rotation)",
+      "instanceUrl": "SearXNG instance URL (required)",
+      "gatewayHint": "Search MCP shares the local proxy with model routing. A running proxy does not mean search is enabled; disabling search keeps model routing running. Saving with search enabled starts the proxy. LAN access needs a gateway key permitting web-search; page fetching excludes private networks."
     }
   },
   "apps": {
@@ -1282,6 +1277,9 @@
       "modelsHint": "모델을 하나 이상 추가하세요. 모델 ID는 그대로 API에 전송됩니다. WorkBuddy는 아직 같은 모델을 여러 번 추가하는 것을 지원하지 않으므로, 모델 ID 하나는 카드 하나에만 넣을 수 있습니다. 이름을 비워 두면 WorkBuddy 메뉴에 \"공급업체 레이블:모델 ID\"로 표시됩니다.",
       "maxInputTokens": "최대 입력 토큰",
       "maxOutputTokens": "최대 출력 토큰",
+      "thinkingEfforts": "추론 강도",
+      "thinkingEffortsHint": "선택한 강도는 WorkBuddy 모델 메뉴에 표시되고, 고른 강도는 reasoning_effort 값으로 API에 전송됩니다. 아무것도 선택하지 않으면 추론 켜기/끄기 스위치만 표시됩니다.",
+      "canDisableThinking": "추론 끄기 허용",
       "modelIdTaken": "WorkBuddy는 아직 같은 모델을 여러 번 추가하는 것을 지원하지 않으며, 이 모델은 이미 \"{{owner}}\"에 있습니다. 이 카드로 옮기려면 먼저 그쪽에서 삭제하세요.",
       "modelOwnerUser": "WorkBuddy에서 직접 추가한 모델",
       "presetModelsSkipped": "WorkBuddy는 아직 같은 모델을 여러 번 추가하는 것을 지원하지 않아, 이미 다른 카드에 있는 모델은 건너뛰었습니다: {{models}}. 이 카드로 옮기려면 원래 카드에서 먼저 삭제한 뒤 여기에서 다시 추가하세요."
@@ -1795,22 +1793,9 @@
     }
   },
   "console": {
-    "providerSwitchReceived": "수신된 공급자 전환 이벤트:",
-    "setupListenerFailed": "공급자 전환 이벤트 수신기 설정 실패:",
-    "updateProviderFailed": "공급자 업데이트 실패:",
-    "autoImportFailed": "기본 설정 자동 가져오기 실패:",
     "openLinkFailed": "링크를 열지 못했습니다:",
-    "getVersionFailed": "버전 정보를 가져오지 못했습니다:",
-    "loadSettingsFailed": "설정을 로드하지 못했습니다:",
-    "getConfigPathFailed": "설정 경로를 가져오지 못했습니다.",
-    "getConfigDirFailed": "설정 디렉터리를 가져오지 못했습니다.",
-    "detectPortableFailed": "휴대용 모드를 감지하지 못했습니다.",
-    "saveSettingsFailed": "설정을 저장하지 못했습니다.",
     "updateFailed": "업데이트 실패:",
     "checkUpdateFailed": "업데이트 확인 실패:",
-    "openConfigFolderFailed": "설정 폴더를 열지 못했습니다:",
-    "selectConfigDirFailed": "설정 디렉터리를 선택하지 못했습니다.",
-    "getDefaultConfigDirFailed": "기본 설정 디렉터리를 가져오지 못했습니다.",
     "openReleaseNotesFailed": "릴리스 노트를 열지 못했습니다:"
   },
   "providerForm": {
@@ -2073,12 +2058,10 @@
     "selectAccount": "계정 선택",
     "selectAccountPlaceholder": "GitHub 계정을 선택하세요",
     "useDefaultAccount": "기본 계정 사용",
-    "loggedInAccounts": "로그인된 계정",
     "defaultAccount": "기본값",
     "selected": "선택됨",
     "removeAccount": "계정 삭제",
     "setAsDefault": "기본값으로 설정",
-    "addAnotherAccount": "다른 계정 추가",
     "retry": "다시 시도",
     "copyCode": "코드 복사",
     "migrationFailed": "레거시 인증 마이그레이션 실패: {{error}}",
@@ -2132,7 +2115,6 @@
     "enterCode": "브라우저에 코드를 입력하세요:",
     "accountCount": "계정 {{count}}개",
     "selectAccount": "계정 선택",
-    "chatgptAccount": "ChatGPT 계정",
     "accountToUse": "사용할 계정",
     "signInMethod": "로그인 방법",
     "manageAccounts": "계정 관리",
@@ -2142,18 +2124,14 @@
     "explicitSelectionRequired": "로그인 방법을 선택하세요",
     "useDefaultAccount": "기본 계정 사용",
     "noneOptionLabel": "Codex에 로그인된 계정 사용",
-    "reauthDescription": "브라우저 로그인과 동일한 방식으로 계정을 사용하려면 다시 로그인하여 필요한 로그인 자격 증명(id_token)을 보완해야 합니다. 다시 로그인하면 관리형 계정 연결에 사용할 수 있습니다.",
     "reauthBadge": "다시 로그인 필요",
-    "reauthLogin": "다시 로그인",
     "reauthSelectHint": "관리형 연결을 사용하려면 이 계정에 다시 로그인해야 합니다.",
     "reauthNow": "지금 다시 로그인",
     "duplicateAccount": "이 ChatGPT 계정은 이미 추가되었습니다. 기존 계정을 사용하세요.",
-    "loggedInAccounts": "로그인된 계정",
     "defaultAccount": "기본값",
     "selected": "선택됨",
     "removeAccount": "계정 삭제",
     "setAsDefault": "기본값으로 설정",
-    "addAnotherAccount": "다른 계정 추가",
     "logoutAll": "모든 계정 로그아웃",
     "retry": "다시 시도",
     "copyCode": "코드 복사",
@@ -2162,7 +2140,6 @@
     "loginMethod": "로그인 방법",
     "browserLogin": "브라우저 로그인",
     "deviceCodeLogin": "디바이스 코드 로그인",
-    "openBrowserLogin": "브라우저에서 로그인",
     "loginExpired": "로그인이 만료되었습니다. 다시 시도해 주세요."
   },
   "xaiOauth": {
@@ -2216,7 +2193,6 @@
     "testing": "테스트 중",
     "addEndpointPlaceholder": "https://api.example.com",
     "done": "완료",
-    "noEndpoints": "엔드포인트 없음",
     "failed": "실패",
     "enterValidUrl": "유효한 URL을 입력하세요.",
     "invalidUrlFormat": "잘못된 URL 형식",
@@ -2224,12 +2200,7 @@
     "urlExists": "이 URL은 이미 존재합니다.",
     "saveFailed": "저장하지 못했습니다. 다시 시도해 주세요.",
     "loadEndpointsFailed": "사용자 지정 엔드포인트를 로드하지 못했습니다.",
-    "addEndpointFailed": "사용자 지정 엔드포인트를 추가하지 못했습니다.",
-    "removeEndpointFailed": "사용자 지정 엔드포인트를 제거하지 못했습니다.",
-    "removeFailed": "제거 실패: {{error}}",
-    "updateLastUsedFailed": "엔드포인트 마지막 사용 시간을 업데이트하지 못했습니다.",
     "pleaseAddEndpoint": "먼저 엔드포인트를 추가하세요.",
-    "testUnavailable": "속도 테스트 불가",
     "noResult": "반환된 결과가 없습니다.",
     "testFailed": "속도 테스트 실패: {{error}}",
     "empty": "엔드포인트 없음"
@@ -2287,8 +2258,10 @@
     "agentMaxThreadsPlaceholder": "비워 두면 Codex 기본값 사용",
     "agentMaxThreadsV2Override": "config.toml의 [features.multi_agent_v2]에 주 에이전트를 포함한 총수가 {{total}}개로 설정되어 있습니다. 새 서브에이전트 도구를 사용할 때는 이 값이 적용됩니다.",
     "autoReviewModelLabel": "자동 승인 모델",
+    "autoReviewModelHint": "The model Codex uses for Approve for me. Enter a model ID or fetch models from this provider without adding them to the model list. Blank uses codex-auto-review. Save the provider and restart Codex after changes. Aggregation mode uses its separate settings.",
     "autoReviewModelCodexDefault": "Codex 기본값(codex-auto-review)",
     "autoReviewModelMainDefault": "주 모델이 직접 승인 (기본값)",
+    "autoReviewModelNoList": "No model list is required. Enter a reviewer model directly; blank uses codex-auto-review.",
     "officialSpeedTiersLabel": "공식 Fast 단계 유지",
     "officialSpeedTiersHint": "모델 목록의 GPT 모델에 공식 Fast 속도 단계를 유지하여 Codex에서 Fast를 선택하면 요청에 service_tier=priority가 포함되도록 합니다. 공식 ChatGPT 계정으로 요청을 전달하는 중계 서비스(예: CPA)만 이를 지원하며, 할당량이 더 빠르게 소모됩니다. 다른 업스트림에서는 오류가 발생하거나 더 높은 요금이 청구될 수 있습니다. 이 옵션을 켜면 이전에 공식 공급자 카드에서 선택한 Fast가 이 공급자에도 즉시 적용됩니다. 통합 모드에서는 적용되지 않습니다. 변경 후 Codex를 다시 시작하세요.",
     "modelListHint": "변경 후 Codex를 다시 시작하세요.",
@@ -2325,7 +2298,6 @@
     "instructionsFileEditTitle": "Edit model instructions file",
     "instructionsFileDeleteTitle": "Delete model instructions file",
     "instructionsFileDuplicate": "This file is already in the list",
-    "autoReviewModelHint": "The model Codex uses for Approve for me. Enter a model ID or fetch models from this provider without adding them to the model list. Blank uses codex-auto-review. Save the provider and restart Codex after changes. Aggregation mode uses its separate settings.",
     "instructionsFileSaveSuccess": "Model instructions file saved",
     "instructionsFileStateEmpty": "File is empty",
     "instructionsFileStateMissing": "File not found",
@@ -2363,7 +2335,6 @@
     "instructionsFileEdit": "Edit file",
     "instructionsFileContent": "File content",
     "instructionsFileHint": "Enabling a file replaces Codex's built-in base instructions for the selected model. Use this only when a custom model requires dedicated instructions.",
-    "autoReviewModelNoList": "No model list is required. Enter a reviewer model directly; blank uses codex-auto-review.",
     "instructionsFileStateNotFile": "Path is not a file",
     "instructionsFileReadRetry": "The file could not be read, so it cannot be saved safely. Close and retry or check its permissions.",
     "instructionsFileStateCheckFailed": "File check failed"
@@ -2941,6 +2912,7 @@
     "tokenPlanHint": "공급자의 API 키와 기본 URL을 자동으로 사용하여 Token Plan 할당량을 조회합니다",
     "balanceHint": "공급자의 API 키를 자동으로 사용하여 계정 잔액을 조회합니다.",
     "officialSubscriptionHint": "로컬 CLI OAuth 자격 증명을 읽고 공식 API를 호출하여 구독 할당량을 조회합니다. 기본적으로 비활성화되어 있으며 활성화한 후에만 요청합니다.",
+    "officialSubscriptionHintAgy": "Queries the official quota using account tokens saved in the Auth Center. If the current sign-in cannot be identified or the platform does not support account switching, falls back to agy's /usage command (about 10 seconds). Disabled by default; runs after you enable it.",
     "resetDate": "초기화 날짜",
     "premiumRequests": "크레딧",
     "credentialsConfig": "자격 증명",
@@ -3009,8 +2981,7 @@
     "fieldExtra": "• extra: 문자열, 사용자 지정 표시 텍스트",
     "tip1": "• {{apiKey}} 및 {{baseUrl}} 변수는 자동으로 치환됩니다.",
     "tip2": "• extractor 함수는 샌드박스 환경에서 실행되며 ES2020+ 문법을 지원합니다",
-    "tip3": "• 객체 리터럴 표현식을 형성하려면 전체 설정을 ()로 묶어야 합니다.",
-    "officialSubscriptionHintAgy": "Queries the official quota using account tokens saved in the Auth Center. If the current sign-in cannot be identified or the platform does not support account switching, falls back to agy's /usage command (about 10 seconds). Disabled by default; runs after you enable it."
+    "tip3": "• 객체 리터럴 표현식을 형성하려면 전체 설정을 ()로 묶어야 합니다."
   },
   "dbUpgrade": {
     "title": "데이터베이스 버전이 너무 최신입니다.",
@@ -3040,8 +3011,6 @@
   "presetSelector": {
     "title": "설정 유형 선택",
     "custom": "사용자 지정",
-    "customDescription": "공급자를 수동으로 설정합니다. 필요한 설정 정보를 모두 입력하세요.",
-    "officialDescription": "공식 로그인을 사용하므로 API 키를 입력할 필요가 없습니다.",
     "presetDescription": "프리셋 설정을 사용하므로 API 키만 입력하면 됩니다."
   },
   "mcp": {
@@ -3668,7 +3637,7 @@
     },
     "repo": {
       "title": "스킬 저장소 관리",
-      "description": "GitHub 스킬 저장소 추가 또는 제거",
+      "description": "GitHub / GitLab 스킬 저장소 추가 또는 제거",
       "url": "저장소 URL",
       "urlPlaceholder": "GitHub owner/name 또는 Codeberg / Forgejo HTTPS URL",
       "branch": "브랜치",
@@ -3678,10 +3647,13 @@
       "list": "추가된 저장소",
       "empty": "저장소 없음",
       "invalidUrl": "잘못된 저장소 URL 형식",
+      "httpsOnly": "GitLab 저장소는 https 주소만 지원합니다",
       "addSuccess": "저장소 {{owner}}/{{name}}을(를) 추가하고 스킬 {{count}}개를 찾았습니다",
       "addFailed": "추가하지 못했습니다.",
       "removeSuccess": "저장소 {{owner}}/{{name}} 제거를 완료했습니다.",
-      "skillCount": "스킬 {{count}}개 발견"
+      "skillCount": "스킬 {{count}}개 발견",
+      "provider": "Repository type",
+      "providerAuto": "Detect automatically"
     },
     "search": "스킬 검색",
     "searchPlaceholder": "스킬 이름 또는 저장소 검색...",
@@ -3929,7 +3901,6 @@
   },
   "providerIcon": {
     "label": "아이콘",
-    "colorLabel": "아이콘 색상",
     "selectIcon": "아이콘 선택",
     "preview": "미리보기",
     "clickToChange": "아이콘을 변경하려면 클릭하세요.",
@@ -4089,15 +4060,16 @@
       "title": "장애 조치 대기열",
       "description": "각 앱 공급자의 장애 조치 순서 관리",
       "info": "자동 장애 조치(failover)가 활성화되면 요청은 큐 우선 순위(P1 우선)를 따릅니다. 오류가 발생하면 시스템은 대기열의 다음 공급자를 시도합니다.",
-      "selectProvider": "대기열에 추가할 공급자를 선택하세요.",
-      "noAvailableProviders": "추가할 수 있는 공급자가 없습니다.",
       "empty": "장애 조치 대기열이 비어 있습니다. 자동 장애 조치를 활성화하려면 공급자를 추가하세요.",
       "toggleEnabled": "활성화/비활성화",
       "addSuccess": "장애 조치 대기열에 추가됨",
       "addFailed": "추가하지 못했습니다.",
       "removeSuccess": "장애 조치 대기열에서 제거됨",
+      "toggleFailed": "상태를 업데이트하지 못했습니다.",
+      "selectProvider": "대기열에 추가할 공급자를 선택하세요.",
+      "noAvailableProviders": "추가할 수 있는 공급자가 없습니다.",
       "removeFailed": "제거하지 못했습니다.",
-      "toggleFailed": "상태를 업데이트하지 못했습니다."
+      "modelInfo": "This fallback queue applies to the current model family. An empty queue uses the global Claude fallback queue."
     },
     "autoFailover": {
       "info": "장애 조치 대기열에 공급자가 여러 개 있으면 요청 실패 시 우선순위에 따라 순서대로 시도합니다. 연속 실패 횟수가 임계값에 도달하면 서킷 브레이커가 열리고 해당 공급자를 일시적으로 건너뜁니다.",
@@ -4370,6 +4342,47 @@
       "saveFailed": "Failed to save routing strategy",
       "hint": "When auto failover is on and the queue has multiple providers, this decides the primary route and failover order. No effect with a single provider.",
       "title": "Routing strategy"
+    },
+    "mode": {
+      "global": "Global failover mode",
+      "modelRoutingAndFailover": "Model failover and model family routing",
+      "modelFailover": "Model failover mode",
+      "modelRouting": "Model family routing mode",
+      "recentSwitch": "Last switch: {{provider}} ({{source}})",
+      "bannerTitle": "Claude model routing (model to provider)",
+      "virtualProvider": "Virtual provider",
+      "routeToggle": "Routing mode",
+      "editForkFailover": "Edit Claude routing settings",
+      "globalFallback": "Use global fallback",
+      "tagFailover": "Failover",
+      "tagDefault": "Default route",
+      "recentSwitchEmpty": "Last switch: none",
+      "modelNameForProvider": "Model: {{model}}"
+    },
+    "switchSource": {
+      "failover": "Failover",
+      "failoverEnabled": "Failover enabled",
+      "manual": "Manual switch"
+    },
+    "claudeModelRouting": {
+      "title": "Custom Claude model routing",
+      "description": "Try the preferred provider, then model fallbacks, then global fallbacks.",
+      "step2": "Preferred provider for each model family",
+      "modelColumn": "Model",
+      "defaultProvider": "Choose preferred provider",
+      "failoverMode": "Model fallback strategy",
+      "statusColumn": "Status",
+      "none": "Use global default",
+      "searchProvider": "Search providers by name...",
+      "providerNotFound": "No matching providers",
+      "failoverModeRoundRobin": "Round robin",
+      "failoverModeRandom": "Random",
+      "rowRouteActive": "Preferred provider selected",
+      "rowRouteInactive": "Using global default",
+      "step3": "Model fallback order",
+      "modelQueueTitle": "Model fallback queue",
+      "modelQueueDescription": "Try providers from top to bottom. An empty model queue uses global fallbacks.",
+      "queueDisabledHint": "Model routing is disabled. Enable Claude model routing in the provider list first."
     }
   },
   "streamCheck": {
@@ -4381,13 +4394,10 @@
   },
   "proxyConfig": {
     "proxyEnabled": "라우팅 마스터 스위치",
-    "appTakeover": "라우팅 활성화됨",
-    "perAppConfig": "앱별 설정",
     "circuitBreaker": "서킷 브레이커 설정",
     "circuitBreakerSettings": "서킷 브레이커 설정",
     "failureThreshold": "실패 임계값",
     "successThreshold": "복구 성공 임계값",
-    "recoveryTimeout": "복구 대기 시간",
     "errorRateThreshold": "오류율 임계값",
     "minRequests": "최소 요청 수",
     "timeoutConfig": "제한 시간 설정",
@@ -5368,7 +5378,7 @@
       "disabledShort": "꺼짐",
       "disabled": "꺼짐, 탐색에 사용하지 않음",
       "manage": "저장소 추가 또는 관리",
-      "openAria": "GitHub에서 {{repo}} 열기",
+      "openAria": "브라우저에서 {{repo}} 열기",
       "removeAria": "저장소 {{repo}} 제거",
       "readFailed": "읽기 실패"
     },
@@ -5567,6 +5577,7 @@
       "denied": "인증이 거부되었습니다. 다시 로그인하세요.",
       "cancelled": "이 로그인은 취소되거나 다른 로그인으로 교체되었습니다. 다시 로그인하세요.",
       "success": "Kimi Code에 로그인하고 공식 모델을 추가했습니다.",
+      "removeConfirm": "Remove {{name}}? Its provider, models and local card are removed. Independent credentials are deleted only when no other provider or service references them. Other accounts are not affected.",
       "dismissConfirm": "{{name}}을(를) 목록에서 제거하시겠습니까? Kimi Code 자체 로그인 계정이므로 CC Switch에서 대신 로그아웃하지 않으며 자격 증명과 모델도 유지됩니다. 로그아웃하려면 Kimi Code에서 /logout을 실행하세요. 이후 다시 로그인하면 목록에 다시 표시됩니다.",
       "primaryHidden": "Kimi Code 자체 로그인 계정을 목록에서 제거했습니다. 같은 계정으로 다시 로그인하면 되찾을 수 있습니다.",
       "removeCurrentHint": "사용 중인 계정입니다. 제거하기 전에 다른 계정으로 전환하세요.",
@@ -5575,8 +5586,7 @@
       "connectionManaged": "연결 및 로그인은 인증 센터에서 관리하며, 여기서는 모델만 편집합니다. ‘모델 목록 가져오기’를 누르면 이 계정에서 현재 사용할 수 있는 공식 모델 목록을 불러옵니다.",
       "primaryShort": "Kimi Code 자체 로그인",
       "empty": "아직 Kimi 계정이 없습니다. Kimi Code에 로그인된 계정이 자동으로 여기에 표시됩니다.",
-      "help": "Kimi 코딩 요금제 계정을 여러 개 추가할 수 있습니다. 각 계정에는 Kimi Code의 개별 공급자와 모델이 생깁니다. “이 계정 사용”을 누르면 Kimi Code의 기본 모델이 해당 계정의 모델로 변경되며 이후 새 세션에서 사용됩니다. Kimi Code 자체 로그인 계정은 자동으로 표시되며 웹 검색과 웹 페이지 가져오기에 항상 사용됩니다. 여기에서 제거해도 목록에서만 숨겨지며 Kimi Code에서 로그아웃되지 않습니다.",
-      "removeConfirm": "Remove {{name}}? Its provider, models and local card are removed. Independent credentials are deleted only when no other provider or service references them. Other accounts are not affected."
+      "help": "Kimi 코딩 요금제 계정을 여러 개 추가할 수 있습니다. 각 계정에는 Kimi Code의 개별 공급자와 모델이 생깁니다. “이 계정 사용”을 누르면 Kimi Code의 기본 모델이 해당 계정의 모델로 변경되며 이후 새 세션에서 사용됩니다. Kimi Code 자체 로그인 계정은 자동으로 표시되며 웹 검색과 웹 페이지 가져오기에 항상 사용됩니다. 여기에서 제거해도 목록에서만 숨겨지며 Kimi Code에서 로그아웃되지 않습니다."
     },
     "modelSelectionHint": "공급자 카드의 전환 버튼을 눌러 기본 공급자를 선택하세요. 다른 모델을 지정하려면 Kimi Code에서 /model을 사용하세요.",
     "contextSize": "컨텍스트 창",
@@ -5676,6 +5686,19 @@
       "managedHint": "이 계정은 인증 센터에서 관리합니다. 로그아웃하면 이 카드가 사라집니다."
     }
   },
+  "autoUpdate": {
+    "toggle": "업데이트 자동 다운로드",
+    "toggleHelp": "새 버전을 백그라운드에서 다운로드하고 설치 전에 확인합니다. 확인 없이 설치하지 않습니다.",
+    "unsupported": "포터블 버전과 Linux deb / rpm 패키지에서는 사용할 수 없습니다",
+    "readyTitle": "새 버전 v{{version}} 다운로드가 완료되었습니다",
+    "readyBody": "지금 설치할까요? CC Switch가 다시 시작됩니다.",
+    "readyBodyRouting": "지금 설치할까요? CC Switch가 다시 시작되며, 로컬 라우팅을 거쳐 진행 중인 요청이 중단됩니다.",
+    "later": "나중에",
+    "installNow": "설치 후 다시 시작",
+    "installFailed": "업데이트 설치에 실패했습니다",
+    "downloadingInline": "새 버전을 백그라운드에서 다운로드하는 중…",
+    "downloadedInline": "다운로드 완료"
+  },
   "claudeAppendInstructions": {
     "shellWrapperUpgrade": "Update",
     "duplicate": "This file is already listed",
@@ -5752,7 +5775,8 @@
     "manage": "Claude append instructions",
     "shellWrapperInstalling": "Installing...",
     "content": "File content",
-    "saveFailed": "Could not save the Claude append instruction file: {{error}}"
+    "saveFailed": "Could not save the Claude append instruction file: {{error}}",
+    "shellWrapperStaleConfig": "The old config file {{path}} still contains a wrapper, which can define the function twice. Install or update to remove it."
   },
   "claudeSystemInstructions": {
     "add": "New file",
@@ -5825,17 +5849,32 @@
     "targetColumn": "Target model",
     "add": "Add alias"
   },
-  "autoUpdate": {
-    "toggle": "업데이트 자동 다운로드",
-    "toggleHelp": "새 버전을 백그라운드에서 다운로드하고 설치 전에 확인합니다. 확인 없이 설치하지 않습니다.",
-    "unsupported": "포터블 버전과 Linux deb / rpm 패키지에서는 사용할 수 없습니다",
-    "readyTitle": "새 버전 v{{version}} 다운로드가 완료되었습니다",
-    "readyBody": "지금 설치할까요? CC Switch가 다시 시작됩니다.",
-    "readyBodyRouting": "지금 설치할까요? CC Switch가 다시 시작되며, 로컬 라우팅을 거쳐 진행 중인 요청이 중단됩니다.",
-    "later": "나중에",
-    "installNow": "설치 후 다시 시작",
-    "installFailed": "업데이트 설치에 실패했습니다",
-    "downloadingInline": "새 버전을 백그라운드에서 다운로드하는 중…",
-    "downloadedInline": "다운로드 완료"
+  "providerOverrides": {
+    "title": "Provider resource overrides",
+    "description": "Use global MCP, Skill and Prompt settings when disabled. Enabled overrides apply only to this provider.",
+    "mcpTitle": "MCP overrides",
+    "mcpDescriptionWithEnableList": "Disable selected globally enabled MCP servers or enable servers disabled in MCP management for this provider.",
+    "mcpDescription": "Disable selected globally enabled MCP servers for this provider.",
+    "globalEnabledCount": "{{count}} globally enabled",
+    "checkedMeansDisabled": "Checked items are disabled for this provider",
+    "noMcp": "No MCP servers are globally enabled for this app.",
+    "globalDisabledCount": "{{count}} globally disabled",
+    "checkedMeansEnabled": "Checked items are enabled for this provider",
+    "noDisabledMcp": "No MCP servers are disabled for this app.",
+    "skillTitle": "Skill overrides",
+    "skillDescription": "Disable selected globally enabled skills or enable skills disabled in Skills management for this provider.",
+    "noSkill": "No skills are globally enabled for this app.",
+    "noDisabledSkill": "No skills are disabled for this app.",
+    "promptTitle": "Prompt overrides",
+    "promptDescription": "Choose a prompt for this provider or disable prompts.",
+    "globalPrompt": "Global prompt: {{name}}",
+    "none": "Not set",
+    "promptMode": "Override mode",
+    "promptModeSelected": "Use selected prompt",
+    "promptModeDisabled": "Disable prompts",
+    "promptSelect": "Choose a prompt",
+    "promptPlaceholder": "Select a prompt",
+    "followGlobalIfMissing": "Use the global prompt when no prompt is selected",
+    "noPrompt": "No prompts are available for this app."
   }
 }

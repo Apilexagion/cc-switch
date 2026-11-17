@@ -213,9 +213,7 @@ pub(crate) async fn sync_save_settings<B: SyncBackend>(
 /// Forget the saved config (connection, credentials, remote root, status) on
 /// this device. Remote snapshots are left untouched.
 pub(crate) async fn sync_clear_settings<B: SyncBackend>() -> Result<Value, String> {
-    run_with_sync_lock(async { B::store(None) })
-        .await
-        .map_err(|e| e.to_string())?;
+    run_with_sync_lock(async { B::store(None) }).await?;
     Ok(json!({ "success": true }))
 }
 

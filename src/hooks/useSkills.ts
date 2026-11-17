@@ -448,9 +448,16 @@ export function useAddSkillRepo() {
       void queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });
       if (!repo.enabled) return { skills: [], failures: [] };
       try {
-        return await (repo.repoUrl
-          ? skillsApi.discoverRepo(repo.owner, repo.name, repo.repoUrl)
-          : skillsApi.discoverRepo(repo.owner, repo.name));
+        return await (repo.host && repo.host !== "github.com"
+          ? skillsApi.discoverRepo(
+              repo.owner,
+              repo.name,
+              repo.repoUrl,
+              repo.host,
+            )
+          : repo.repoUrl
+            ? skillsApi.discoverRepo(repo.owner, repo.name, repo.repoUrl)
+            : skillsApi.discoverRepo(repo.owner, repo.name));
       } catch (error) {
         console.error("[useAddSkillRepo] discover repo failed", error);
         return null;
@@ -476,10 +483,12 @@ export function useAddSkillRepo() {
 export function useRemoveSkillRepo() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ owner, name, repoUrl }: SkillRepositoryRef) =>
-      repoUrl
-        ? skillsApi.removeRepo(owner, name, repoUrl)
-        : skillsApi.removeRepo(owner, name),
+    mutationFn: ({ owner, name, repoUrl, host }: SkillRepositoryRef) =>
+      host && host !== "github.com"
+        ? skillsApi.removeRepo(owner, name, repoUrl, host)
+        : repoUrl
+          ? skillsApi.removeRepo(owner, name, repoUrl)
+          : skillsApi.removeRepo(owner, name),
     onMutate: nextRepoMutation,
     onSuccess: async (_result, repo, ctx) => {
       void queryClient.invalidateQueries({ queryKey: ["skills", "repos"] });

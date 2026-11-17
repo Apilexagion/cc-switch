@@ -158,10 +158,7 @@ export interface ClaudeDesktopModelRoute {
 }
 
 export type CodexChatThinkingParam =
-  | "none"
-  | "thinking"
-  | "enable_thinking"
-  | "reasoning_split";
+  "none" | "thinking" | "enable_thinking" | "reasoning_split";
 
 export type CodexChatEffortParam =
   | "none"
@@ -237,10 +234,7 @@ export interface ProviderMeta {
   // - "openai_responses": OpenAI Responses API 格式，需要格式转换
   // - "gemini_native": Gemini Native generateContent API 格式，需要格式转换
   apiFormat?:
-    | "anthropic"
-    | "openai_chat"
-    | "openai_responses"
-    | "gemini_native";
+    "anthropic" | "openai_chat" | "openai_responses" | "gemini_native";
   // Managed Codex Copilot uses this instead of apiFormat. Missing/unknown means auto.
   // Keep the raw string so selections from newer versions survive an edit/save.
   codexCopilotApiFormat?: string;
@@ -316,10 +310,7 @@ export type SkillStorageLocation = "cc_switch" | "unified";
 // - "openai_responses": OpenAI Responses API 格式，需要格式转换
 // - "gemini_native": Gemini Native generateContent API 格式，需要格式转换
 export type ClaudeApiFormat =
-  | "anthropic"
-  | "openai_chat"
-  | "openai_responses"
-  | "gemini_native";
+  "anthropic" | "openai_chat" | "openai_responses" | "gemini_native";
 
 // Claude 路由经 OpenAI Chat / Responses 转发时思考档位的发法；缺省 = 自动
 export type ClaudeReasoningEffortMode = "off" | "passthrough";
@@ -679,11 +670,7 @@ export type ToolKind =
   | "other";
 
 export type ToolStatus =
-  | "success"
-  | "error"
-  | "interrupted"
-  | "pending"
-  | "unknown";
+  "success" | "error" | "interrupted" | "pending" | "unknown";
 
 export type EventKind =
   | "aborted"
@@ -923,19 +910,6 @@ export interface McpServer {
 
 // MCP 服务器映射（id -> McpServer）
 export type McpServersMap = Record<string, McpServer>;
-
-// MCP 配置状态
-export interface McpStatus {
-  userConfigPath: string;
-  userConfigExists: boolean;
-  serverCount: number;
-}
-
-// 新：来自 config.json 的 MCP 列表响应
-export interface McpConfigResponse {
-  configPath: string;
-  servers: Record<string, McpServer>;
-}
 
 // ============================================================================
 // 统一供应商（Universal Provider）- 跨应用共享配置

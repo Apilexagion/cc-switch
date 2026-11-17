@@ -50,6 +50,7 @@ pub fn import_skill_from_deeplink(
     // Create SkillRepo
     let repo = SkillRepo {
         repo_url: None,
+        host: crate::services::skill::GITHUB_HOST.to_string(),
         owner: owner.clone(),
         name: name.clone(),
         branch,

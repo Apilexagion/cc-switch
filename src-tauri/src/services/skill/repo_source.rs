@@ -7,16 +7,22 @@ use url::Url;
 pub(super) struct RepoSource {
     pub url: Url,
     pub github: bool,
+    pub gitlab: bool,
 }
 
 impl SkillRepo {
     pub(crate) fn canonical_repo_url(&self) -> Result<Option<String>> {
-        Ok(RepoSource::new(&self.owner, &self.name, self.repo_url.as_deref())?.stored_url())
+        Ok(RepoSource::for_repo(self)?.stored_url())
     }
 
     pub(crate) fn validate(&self) -> Result<()> {
         if self.repo_url.is_none() {
-            return SkillService::validate_repo_ref(&self.owner, &self.name, &self.branch);
+            return SkillService::validate_repo_coords(
+                &self.host,
+                &self.owner,
+                &self.name,
+                &self.branch,
+            );
         }
         let source = RepoSource::new(&self.owner, &self.name, self.repo_url.as_deref())?;
         if source.github {
@@ -30,6 +36,28 @@ impl SkillRepo {
 }
 
 impl RepoSource {
+    pub fn for_repo(repo: &SkillRepo) -> Result<Self> {
+        Self::for_host(
+            &repo.host,
+            &repo.owner,
+            &repo.name,
+            repo.repo_url.as_deref(),
+        )
+    }
+
+    pub fn for_host(host: &str, owner: &str, name: &str, repo_url: Option<&str>) -> Result<Self> {
+        if repo_url.is_some() || host == super::GITHUB_HOST {
+            return Self::new(owner, name, repo_url);
+        }
+        SkillService::validate_repo_coords(host, owner, name, "main")?;
+        let url = Url::parse(&format!("https://{host}/{owner}/{name}"))?;
+        Ok(Self {
+            url,
+            github: false,
+            gitlab: true,
+        })
+    }
+
     pub fn new(owner: &str, name: &str, repo_url: Option<&str>) -> Result<Self> {
         let fallback = format!("https://github.com/{owner}/{name}");
         let raw = repo_url.unwrap_or(&fallback).trim().trim_end_matches('/');
@@ -83,16 +111,25 @@ impl RepoSource {
                 }
             }
         }
-        Ok(Self { url, github })
+        Ok(Self {
+            url,
+            github,
+            gitlab: false,
+        })
     }
 
     pub fn stored_url(&self) -> Option<String> {
-        (!self.github).then(|| self.url.to_string())
+        (!self.github && !self.gitlab).then(|| self.url.to_string())
     }
 
     pub fn identity(&self, owner: &str, name: &str) -> String {
         if self.github {
             format!("{owner}/{name}")
+        } else if self.gitlab {
+            format!(
+                "{}/{owner}/{name}",
+                &self.url[url::Position::BeforeHost..url::Position::AfterPort]
+            )
         } else {
             format!("forgejo:{}", self.url)
         }
@@ -193,6 +230,22 @@ impl RepoSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gitlab_identity_includes_host_and_https_port() {
+        let a = RepoSource::for_host("git.example:8443", "group/sub", "repo", None).unwrap();
+        let b = RepoSource::for_host("git.example:9443", "group/sub", "repo", None).unwrap();
+        assert!(a.gitlab && b.gitlab);
+        assert!(a.stored_url().is_none());
+        assert_eq!(
+            a.identity("group/sub", "repo"),
+            "git.example:8443/group/sub/repo"
+        );
+        assert_ne!(
+            a.identity("group/sub", "repo"),
+            b.identity("group/sub", "repo")
+        );
+    }
 
     #[test]
     fn forgejo_supports_codeberg_and_self_hosted_path_prefixes() {
