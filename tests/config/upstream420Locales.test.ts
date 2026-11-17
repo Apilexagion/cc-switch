@@ -12,7 +12,6 @@ const paths = [
   "codexOauth.loginMethod",
   "codexOauth.browserLogin",
   "codexOauth.deviceCodeLogin",
-  "codexOauth.openBrowserLogin",
   "codexOauth.loginExpired",
 ];
 

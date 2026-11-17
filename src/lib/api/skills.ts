@@ -297,11 +297,6 @@ export const skillsApi = {
     return await invoke("update_skill", { id });
   },
 
-  /** 批量更新 Skills */
-  async updateAllSkills(ids: string[]): Promise<InstalledSkill[]> {
-    return await invoke("update_all_skills", { ids });
-  },
-
   /** 迁移 Skill 存储位置 */
   async migrateStorage(
     target: "cc_switch" | "unified",

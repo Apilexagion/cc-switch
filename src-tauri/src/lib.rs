@@ -1863,7 +1863,6 @@ pub fn run() {
             commands::check_skill_updates,
             commands::resync_skills_to_apps,
             commands::update_skill,
-            commands::update_all_skills,
             commands::migrate_skill_storage,
             commands::get_cc_switch_skills_dir,
             commands::open_cc_switch_skills_dir,

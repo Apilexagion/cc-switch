@@ -238,10 +238,10 @@ export function WorkBuddyProviderForm({
     ? Boolean(name.trim() && accountAvailable)
     : Boolean(
         jsonValid &&
-        name.trim() &&
-        (isEdit || (providerKey && !keyInvalid && !keyTaken)) &&
-        urlValid &&
-        modelsValid,
+          name.trim() &&
+          (isEdit || (providerKey && !keyInvalid && !keyTaken)) &&
+          urlValid &&
+          modelsValid,
       );
   const chooseAccount = (account: ManagedAuthAccount) => {
     setAccountId(account.id);

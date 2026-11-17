@@ -2799,17 +2799,19 @@ pub(crate) fn plan_codex_model_catalog(
 /// 不使用只含 gpt-5.5 的静态 fallback：写成外部目录后，Codex 只看文件中的行。
 #[cfg(not(test))]
 fn load_codex_auto_review_base_models() -> Result<Vec<Value>, AppError> {
-    static ROWS: OnceCell<Vec<Value>> = OnceCell::new();
-    ROWS.get_or_try_init(|| {
-        load_codex_bundled_models()
-            .map_err(|error| AppError::Config(format!("Codex model catalog unavailable: {error}")))
-            .and_then(|rows| {
-                normalize_codex_native_rows(rows).ok_or_else(|| {
-                    AppError::Config("Codex bundled model catalog is invalid".to_string())
-                })
+    static ROWS: std::sync::OnceLock<Vec<Value>> = std::sync::OnceLock::new();
+    if let Some(rows) = ROWS.get() {
+        return Ok(rows.clone());
+    }
+    // Cache only successful reads so a temporary discovery failure remains retryable.
+    let rows = load_codex_bundled_models()
+        .map_err(|error| AppError::Config(format!("Codex model catalog unavailable: {error}")))
+        .and_then(|rows| {
+            normalize_codex_native_rows(rows).ok_or_else(|| {
+                AppError::Config("Codex bundled model catalog is invalid".to_string())
             })
-    })
-    .cloned()
+        })?;
+    Ok(ROWS.get_or_init(|| rows).clone())
 }
 
 #[cfg(test)]

@@ -160,10 +160,8 @@ export interface WorkBuddySettingsConfig {
   [key: string]: unknown;
 }
 
-export interface WorkBuddyProviderPreset extends Omit<
-  PiProviderPreset,
-  "settingsConfig"
-> {
+export interface WorkBuddyProviderPreset
+  extends Omit<PiProviderPreset, "settingsConfig"> {
   settingsConfig: WorkBuddySettingsConfig;
 }
 

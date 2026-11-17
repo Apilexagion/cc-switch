@@ -228,20 +228,6 @@ pub async fn update_skill(
         .map_err(|e| e.to_string())
 }
 
-/// 批量更新 Skills
-#[tauri::command]
-pub async fn update_all_skills(
-    ids: Vec<String>,
-    service: State<'_, SkillServiceState>,
-    app_state: State<'_, AppState>,
-) -> Result<Vec<InstalledSkill>, String> {
-    service
-        .0
-        .update_all_skills(&app_state.db, &ids)
-        .await
-        .map_err(|e| e.to_string())
-}
-
 /// 迁移 Skill 存储位置
 #[tauri::command]
 pub async fn migrate_skill_storage(
@@ -345,7 +331,7 @@ pub async fn remove_skill_repo(
                     .unwrap_or(crate::services::skill::GITHUB_HOST),
             )
             .map_err(|e| e.to_string())?;
-        Ok(true)
+        Ok::<_, String>(true)
     })
     .await
 }

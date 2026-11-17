@@ -5428,22 +5428,6 @@ impl SkillService {
             query: resp.query,
         })
     }
-
-    /// 批量更新 Skills，单个失败不中断整体
-    pub async fn update_all_skills(
-        &self,
-        db: &Arc<Database>,
-        ids: &[String],
-    ) -> Result<Vec<InstalledSkill>> {
-        let mut updated = Vec::new();
-        for id in ids {
-            match self.update_skill(db, id).await {
-                Ok(skill) => updated.push(skill),
-                Err(e) => log::warn!("更新 Skill {id} 失败: {e:#}"),
-            }
-        }
-        Ok(updated)
-    }
 }
 
 /// 从 lock 文件信息构建 skill 的 ID、仓库字段和 readme URL
