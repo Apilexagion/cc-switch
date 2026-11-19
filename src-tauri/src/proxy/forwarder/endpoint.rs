@@ -371,7 +371,9 @@ pub(super) fn rewrite_gemini_endpoint_model(
     endpoint: &str,
     model: &str,
 ) -> Result<String, ProxyError> {
-    if super::handler_context::extract_gemini_model_from_path(endpoint).as_deref() == Some(model) {
+    if crate::proxy::handler_context::extract_gemini_model_from_path(endpoint).as_deref()
+        == Some(model)
+    {
         return Ok(endpoint.to_string());
     }
     let (path, query) = split_endpoint_and_query(endpoint);

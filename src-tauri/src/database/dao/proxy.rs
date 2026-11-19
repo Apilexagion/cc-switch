@@ -143,8 +143,8 @@ impl Database {
         app_type: &AppType,
     ) -> Result<AppProxyConfig, AppError> {
         // 使用 block 限制 conn 的作用域，避免跨 await 持有锁
-        let preserve =
-            app_type == "codex" && crate::settings::preserve_codex_official_auth_on_switch();
+        let preserve = matches!(app_type, AppType::Codex)
+            && crate::settings::preserve_codex_official_auth_on_switch();
         let result = {
             let conn = lock_conn!(self.conn);
             let mut stmt = conn.prepare_cached(
