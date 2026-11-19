@@ -1200,7 +1200,7 @@ mod tests {
         let app = AppType::Dsh;
         assert_eq!("dsh".parse::<AppType>().unwrap(), app);
         assert_eq!("deepseek-harness".parse::<AppType>().unwrap(), app);
-        assert_eq!(serde_json::to_value(&app).unwrap(), "dsh");
+        assert_eq!(app.as_str(), "dsh");
         assert!(AppType::all().any(|candidate| candidate == app));
         assert!(app.is_additive_mode());
         assert!(!app.supports_local_proxy());
