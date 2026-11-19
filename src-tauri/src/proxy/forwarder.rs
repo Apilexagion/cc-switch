@@ -791,8 +791,11 @@ impl RequestForwarder {
         }
 
         if self.session_client_provided {
-            self.router
-                .remember_successful_provider(app_type_str, &self.session_id, &provider.id);
+            self.router.remember_successful_provider(
+                app_type.as_str(),
+                &self.session_id,
+                &provider.id,
+            );
         }
 
         // 普通闭合熔断状态异步记录，避免阻塞流式首包返回；
