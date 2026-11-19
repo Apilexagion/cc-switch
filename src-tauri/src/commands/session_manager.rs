@@ -305,6 +305,7 @@ pub async fn export_session_markdown<R: tauri::Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::app_config::AppType;
 
     #[test]
     #[serial_test::serial]
@@ -383,7 +384,7 @@ mod tests {
             serde_json::json!({"env":{"GEMINI_API_KEY":"fixture-secret"},"config":{}}),
             None,
         );
-        db.save_provider("agy", &provider).unwrap();
+        db.save_provider(&AppType::Agy, &provider).unwrap();
         let command = crate::agy_config::resume_command(Some(&dir), "private-id");
         let cwd = project.to_string_lossy().into_owned();
         let (native_command, native_cwd) =

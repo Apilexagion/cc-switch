@@ -3,7 +3,7 @@ use std::sync::Arc;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use cc_switch_lib::{
     import_prompt_from_deeplink, import_provider_from_deeplink, parse_deeplink_url, AppState,
-    Database,
+    AppType, Database,
 };
 
 use crate::support::{ensure_test_home, reset_test_fs, test_mutex};
@@ -34,7 +34,7 @@ fn deeplink_import_opencode_generates_editable_ids_and_preserves_display_names()
             let id = import_provider_from_deeplink(&state, request).unwrap();
             assert!(key_pattern.is_match(&id), "uneditable provider ID: {id}");
             assert!(ids.insert(id.clone()), "duplicate provider ID: {id}");
-            let providers = db.get_all_providers("opencode").unwrap();
+            let providers = db.get_all_providers(&AppType::OpenCode).unwrap();
             let provider = providers.get(&id).unwrap();
             assert_eq!(provider.name, name);
             let live: serde_json::Value = serde_json::from_slice(
@@ -44,7 +44,10 @@ fn deeplink_import_opencode_generates_editable_ids_and_preserves_display_names()
             assert_eq!(live["provider"][&id], provider.settings_config);
         }
     }
-    assert_eq!(db.get_all_providers("opencode").unwrap().len(), ids.len());
+    assert_eq!(
+        db.get_all_providers(&AppType::OpenCode).unwrap().len(),
+        ids.len()
+    );
 }
 
 #[test]
@@ -63,7 +66,9 @@ fn deeplink_import_claude_provider_persists_to_db() {
         .expect("import provider from deeplink");
 
     // Verify DB state
-    let providers = db.get_all_providers("claude").expect("get providers");
+    let providers = db
+        .get_all_providers(&AppType::Claude)
+        .expect("get providers");
     let provider = providers
         .get(&provider_id)
         .expect("provider created via deeplink");
@@ -98,7 +103,9 @@ fn deeplink_import_codex_provider_builds_auth_and_config() {
     let provider_id = import_provider_from_deeplink(&state, request.clone())
         .expect("import provider from deeplink");
 
-    let providers = db.get_all_providers("codex").expect("get providers");
+    let providers = db
+        .get_all_providers(&AppType::Codex)
+        .expect("get providers");
     let provider = providers
         .get(&provider_id)
         .expect("provider created via deeplink");
@@ -144,7 +151,7 @@ fn claude_prompt_append_content_is_imported_as_separate_instruction_file() {
     let prompt_id =
         import_prompt_from_deeplink(&state, request).expect("import prompt from deeplink");
     let prompt = db
-        .get_prompts("claude")
+        .get_prompts(&AppType::Claude)
         .expect("get prompts")
         .shift_remove(&prompt_id)
         .expect("prompt saved");
@@ -183,12 +190,12 @@ fn agy_deeplink_disabled_provider_does_not_write_native_files() {
     let db = Arc::new(Database::memory().unwrap());
     let state = AppState::new(db.clone());
     let id = import_provider_from_deeplink(&state, request).unwrap();
-    let rows = db.get_all_providers("agy").unwrap();
+    let rows = db.get_all_providers(&AppType::Agy).unwrap();
     assert_eq!(
         rows[&id].settings_config["config"]["model"]["name"],
         "test-model"
     );
-    assert!(db.get_current_provider("agy").unwrap().is_none());
+    assert!(db.get_current_provider(&AppType::Agy).unwrap().is_none());
     assert!(!home.join(".gemini/antigravity-cli/settings.json").exists());
     assert!(!home.join(".gemini/antigravity-cli/bin/agy").exists());
 }

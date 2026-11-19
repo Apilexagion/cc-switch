@@ -184,7 +184,7 @@ impl RequestContext {
         // 从数据库读取应用级代理配置（per-app）
         let mut app_config = state
             .db
-            .get_proxy_config_for_app(app_type_str)
+            .get_proxy_config_for_app(&app_type)
             .await
             .map_err(|e| ProxyError::DatabaseError(e.to_string()))?;
 
@@ -319,7 +319,7 @@ impl RequestContext {
                     .and_then(|rule| {
                         match state
                             .db
-                            .get_provider_by_id(&rule.target_provider_id, app_type_str)
+                            .get_provider_by_id(&rule.target_provider_id, &app_type)
                         {
                             Ok(Some(target)) => {
                                 // 模型是独立路由结果，在构造上游协议与 URL 前应用。
@@ -369,7 +369,7 @@ impl RequestContext {
                     let mut selected = state
                         .provider_router
                         .select_providers_with_current(
-                            app_type_str,
+                            &app_type,
                             routing_current,
                             app_config.auto_failover_enabled,
                             sticky_session,
@@ -755,8 +755,9 @@ mod tests {
             json!({"env": {"GEMINI_API_KEY": "test-key", "GOOGLE_GEMINI_BASE_URL": "https://example.test"}}),
             None,
         );
-        db.save_provider("gemini", &provider).unwrap();
-        db.set_current_provider("gemini", &provider.id).unwrap();
+        db.save_provider(&AppType::Gemini, &provider).unwrap();
+        db.set_current_provider(&AppType::Gemini, &provider.id)
+            .unwrap();
         ProxyState::for_test(db)
     }
 
@@ -814,7 +815,7 @@ mod tests {
             json!({}),
             None,
         );
-        state.db.save_provider("gemini", &target).unwrap();
+        state.db.save_provider(&AppType::Gemini, &target).unwrap();
         let config = serde_json::from_value(json!({
             "enabled": true,
             "rules": [{
@@ -870,8 +871,9 @@ base_url = "https://third.example/v1"
             }),
             None,
         );
-        db.save_provider("codex", &provider).expect("save provider");
-        db.set_current_provider("codex", "db-current")
+        db.save_provider(&AppType::Codex, &provider)
+            .expect("save provider");
+        db.set_current_provider(&AppType::Codex, "db-current")
             .expect("set db current provider");
         crate::settings::set_current_provider(&AppType::Codex, None)
             .expect("clear local current provider");

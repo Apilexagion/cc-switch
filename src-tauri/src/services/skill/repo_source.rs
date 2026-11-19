@@ -118,6 +118,10 @@ impl RepoSource {
         })
     }
 
+    pub fn host(&self) -> String {
+        self.url[url::Position::BeforeHost..url::Position::AfterPort].to_string()
+    }
+
     pub fn stored_url(&self) -> Option<String> {
         (!self.github && !self.gitlab).then(|| self.url.to_string())
     }
@@ -190,19 +194,30 @@ impl RepoSource {
         url.to_string()
     }
 
+    fn redirect_stays_on_source(original: &Url, next: &Url) -> bool {
+        next.origin() == original.origin()
+            && next.path().trim_end_matches('/') == original.path().trim_end_matches('/')
+            && next.query().is_none()
+            && next.fragment().is_none()
+            && next.username().is_empty()
+            && next.password().is_none()
+    }
+
     /// Preserve the configured proxy and TLS validation, but never follow a
     /// repository response onto a different host, port, scheme or URL path.
-    pub async fn fetch(&self, initial: &str) -> Result<reqwest::Response> {
+    pub async fn fetch(&self, initial: &str, token: Option<&str>) -> Result<reqwest::Response> {
         let client =
             crate::proxy::http_client::no_redirect_for_url(initial).map_err(|e| anyhow!(e))?;
         let original = Url::parse(initial)?;
         let mut url = original.clone();
         for _ in 0..5 {
-            let response = client
+            let mut request = client
                 .get(url.clone())
-                .header(reqwest::header::USER_AGENT, SKILL_DOWNLOAD_USER_AGENT)
-                .send()
-                .await?;
+                .header(reqwest::header::USER_AGENT, SKILL_DOWNLOAD_USER_AGENT);
+            if let Some(token) = token {
+                request = SkillService::with_bearer(request, token)?;
+            }
+            let response = request.send().await?;
             if !response.status().is_redirection() {
                 return Ok(response);
             }
@@ -212,13 +227,7 @@ impl RepoSource {
                 .ok_or_else(|| anyhow!("Repository redirect has no Location"))?
                 .to_str()?;
             let next = url.join(location)?;
-            if next.origin() != original.origin()
-                || next.path().trim_end_matches('/') != original.path().trim_end_matches('/')
-                || next.query().is_some()
-                || next.fragment().is_some()
-                || !next.username().is_empty()
-                || next.password().is_some()
-            {
+            if !Self::redirect_stays_on_source(&original, &next) {
                 bail!("Repository redirect left the selected source");
             }
             url = next;
@@ -270,6 +279,46 @@ mod tests {
             assert!(source
                 .api_url("owner", "repo")
                 .ends_with("/api/v1/repos/owner/repo"));
+        }
+    }
+
+    #[test]
+    fn token_host_comes_from_explicit_source_even_for_legacy_default_host() {
+        let repo: SkillRepo = serde_json::from_value(serde_json::json!({
+            "owner": "owner", "name": "repo", "branch": "main", "enabled": true,
+            "repoUrl": "https://git.example:8443/forge/owner/repo"
+        }))
+        .unwrap();
+        assert_eq!(repo.host, "github.com");
+        assert_eq!(
+            RepoSource::for_repo(&repo).unwrap().host(),
+            "git.example:8443"
+        );
+    }
+
+    #[test]
+    fn authenticated_source_redirects_cannot_change_origin_or_request_path() {
+        let original =
+            Url::parse("https://git.example:8443/forge/owner/repo/archive/main.zip").unwrap();
+        assert!(RepoSource::redirect_stays_on_source(&original, &original));
+        let mut credentialed = original.clone();
+        credentialed.set_username("user").unwrap();
+        assert!(!RepoSource::redirect_stays_on_source(
+            &original,
+            &credentialed
+        ));
+        for next in [
+            "https://other.example:8443/forge/owner/repo/archive/main.zip",
+            "https://git.example:9443/forge/owner/repo/archive/main.zip",
+            "http://git.example:8443/forge/owner/repo/archive/main.zip",
+            "https://git.example:8443/forge/other/repo/archive/main.zip",
+            "https://git.example:8443/forge/owner/repo/archive/main.zip?target=other",
+            "https://user@git.example:8443/forge/owner/repo/archive/main.zip",
+        ] {
+            assert!(
+                !RepoSource::redirect_stays_on_source(&original, &Url::parse(next).unwrap()),
+                "{next}"
+            );
         }
     }
 

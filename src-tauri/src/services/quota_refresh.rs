@@ -82,14 +82,14 @@ async fn run_once(app: &tauri::AppHandle) {
     for app_type in quota_apps {
         // 2) 需开启故障转移且候选 ≥ 2 才有意义（否则根本不会走路由策略重排）。
         let failover = db
-            .get_proxy_config_for_app(app_type.as_str())
+            .get_proxy_config_for_app(&app_type)
             .await
             .map(|c| c.auto_failover_enabled)
             .unwrap_or(false);
         if !failover {
             continue;
         }
-        let Ok(providers) = db.get_all_providers(app_type.as_str()) else {
+        let Ok(providers) = db.get_all_providers(&app_type) else {
             continue;
         };
         if providers.len() < 2 {

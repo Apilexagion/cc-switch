@@ -89,12 +89,12 @@ pub fn import_prompt_from_deeplink(
     };
 
     // A disabled import is data only and must not rewrite the current live prompt file.
-    state.db.save_prompt(app_type.as_str(), &prompt)?;
+    state.db.save_prompt(&app_type, &prompt)?;
 
     // If enabled flag is set, enable this prompt (which will disable others)
     if should_enable {
-        if let Err(error) = PromptService::enable_prompt(state, app_type, &id) {
-            if let Err(delete_error) = state.db.delete_prompt(app_str, &id) {
+        if let Err(error) = PromptService::enable_prompt(state, app_type.clone(), &id) {
+            if let Err(delete_error) = state.db.delete_prompt(&app_type, &id) {
                 log::error!("启用 Deep Link Prompt 失败后清理 Prompt 记录失败: {delete_error}");
             }
             return Err(error);
@@ -108,7 +108,7 @@ pub fn import_prompt_from_deeplink(
             &append_content,
             should_enable,
         ) {
-            if let Err(delete_error) = state.db.delete_prompt(app_str, &id) {
+            if let Err(delete_error) = state.db.delete_prompt(&app_type, &id) {
                 log::error!("导入 Claude 追加指令失败后清理 Prompt 记录失败: {delete_error}");
             }
             return Err(error);

@@ -181,11 +181,11 @@ fn assert_overlay(app: &AppType, plain: &str, shared: &str) {
 }
 
 fn database_snapshot(state: &AppState, app: &AppType) -> serde_json::Value {
-    serde_json::to_value(state.db.get_prompts(app.as_str()).unwrap()).unwrap()
+    serde_json::to_value(state.db.get_prompts(app).unwrap()).unwrap()
 }
 
 fn assert_database_is_ordinary(state: &AppState, app: &AppType) {
-    for prompt in state.db.get_prompts(app.as_str()).unwrap().values() {
+    for prompt in state.db.get_prompts(app).unwrap().values() {
         assert!(!prompt.content.contains(SHARED_START));
         assert!(!prompt.content.contains(SHARED_END));
     }
@@ -200,7 +200,7 @@ fn codex_shared_overlay_survives_projection_restore_and_never_backfills_into_pro
     let ordinary = "# Ordinary Codex rules\nKeep this final newline.\n";
     state
         .db
-        .save_prompt(app.as_str(), &preset("main", ordinary, false))
+        .save_prompt(&app, &preset("main", ordinary, false))
         .unwrap();
     PromptService::enable_prompt(&state, app.clone(), "main").unwrap();
     assert_eq!(live(&app), ordinary);
@@ -211,7 +211,7 @@ fn codex_shared_overlay_survives_projection_restore_and_never_backfills_into_pro
     assert_eq!(listed["main"].content, ordinary);
     let imported = PromptService::import_from_file(&state, app.clone()).unwrap();
     assert_eq!(
-        state.db.get_prompts(app.as_str()).unwrap()[&imported].content,
+        state.db.get_prompts(&app).unwrap()[&imported].content,
         ordinary
     );
     assert_database_is_ordinary(&state, &app);
@@ -275,7 +275,7 @@ fn agy_shared_overlay_is_opt_in_refreshes_and_preserves_ordinary_prompt() {
     let ordinary = "# Ordinary AGY rules\nKeep this body unchanged.\n";
     state
         .db
-        .save_prompt(app.as_str(), &preset("agy-main", ordinary, false))
+        .save_prompt(&app, &preset("agy-main", ordinary, false))
         .unwrap();
     PromptService::enable_prompt(&state, app.clone(), "agy-main").unwrap();
     assert_eq!(live(&app), ordinary);
@@ -295,7 +295,7 @@ fn agy_shared_overlay_is_opt_in_refreshes_and_preserves_ordinary_prompt() {
     home.shared(None);
     assert_eq!(live(&app), ordinary);
     assert_eq!(
-        state.db.get_prompts(app.as_str()).unwrap()["agy-main"].content,
+        state.db.get_prompts(&app).unwrap()["agy-main"].content,
         ordinary
     );
     assert_database_is_ordinary(&state, &app);
@@ -347,15 +347,12 @@ fn assert_native_additive_global_prompt(app: AppType) {
         }),
         ..Default::default()
     });
-    state.db.save_provider(app.as_str(), &provider).unwrap();
-    state
-        .db
-        .set_current_provider(app.as_str(), &provider.id)
-        .unwrap();
+    state.db.save_provider(&app, &provider).unwrap();
+    state.db.set_current_provider(&app, &provider.id).unwrap();
     let ordinary = "# Native global rules\nKeep this body unchanged.\n";
     state
         .db
-        .save_prompt(app.as_str(), &preset("native-main", ordinary, false))
+        .save_prompt(&app, &preset("native-main", ordinary, false))
         .unwrap();
     PromptService::enable_prompt(&state, app.clone(), "native-main").unwrap();
     assert_eq!(live(&app), ordinary);
@@ -369,7 +366,7 @@ fn assert_native_additive_global_prompt(app: AppType) {
     home.shared(None);
     assert_eq!(live(&app), ordinary);
     assert_eq!(
-        state.db.get_prompts(app.as_str()).unwrap()["native-main"].content,
+        state.db.get_prompts(&app).unwrap()["native-main"].content,
         ordinary
     );
     assert_database_is_ordinary(&state, &app);
@@ -387,7 +384,7 @@ fn formerly_contaminated_codex_database_cannot_resurrect_an_old_shared_block() {
     let ordinary = "ordinary preset\n\n";
     state
         .db
-        .save_prompt(app.as_str(), &preset("old", &polluted, true))
+        .save_prompt(&app, &preset("old", &polluted, true))
         .unwrap();
 
     home.shared(Some("CURRENT_SHARED_RULE"));
@@ -433,7 +430,7 @@ fn a_shared_only_file_is_not_imported_as_an_ordinary_prompt() {
             PromptService::import_from_file_on_first_launch(&state, app.clone()).unwrap(),
             0
         );
-        assert!(state.db.get_prompts(app.as_str()).unwrap().is_empty());
+        assert!(state.db.get_prompts(&app).unwrap().is_empty());
     }
 }
 
@@ -496,7 +493,7 @@ fn mcode_enable_edit_and_disable_keep_shared_instructions_out_of_saved_presets()
     edited.enabled = false;
     PromptService::upsert_prompt(&state, app.clone(), &edited.id, edited.clone()).unwrap();
     assert_overlay(&app, "", "SHARED_MCODE_RULE");
-    let saved = state.db.get_prompts(app.as_str()).unwrap();
+    let saved = state.db.get_prompts(&app).unwrap();
     assert!(!saved[&edited.id].enabled);
     assert_eq!(saved[&edited.id].content, "edited MCode body");
     assert_database_is_ordinary(&state, &app);
@@ -514,7 +511,7 @@ fn mcode_combined_32_kib_limit_rejects_enable_and_edit_without_database_or_file_
     // The ordinary preset itself is exactly within the native limit. Only its
     // composition with the shared block exceeds 32 KiB.
     let large = preset("large", &"x".repeat(32 * 1024), false);
-    state.db.save_prompt(app.as_str(), &large).unwrap();
+    state.db.save_prompt(&app, &large).unwrap();
     let before_db = database_snapshot(&state, &app);
     let before_file = std::fs::read(live_path(&app)).unwrap();
 
@@ -543,7 +540,7 @@ fn pi_shared_overlay_preserves_active_detection_edit_disable_and_external_confli
     PromptService::enable_prompt(&state, app.clone(), &original.id).unwrap();
     assert_overlay(&app, &original.content, "SHARED_PI_RULE");
     assert!(PromptService::get_prompts(&state, app.clone()).unwrap()[&original.id].enabled);
-    assert!(!state.db.get_prompts(app.as_str()).unwrap()[&original.id].enabled);
+    assert!(!state.db.get_prompts(&app).unwrap()[&original.id].enabled);
 
     let mut edited = preset(&original.id, "edited Pi body", true);
     PromptService::upsert_prompt(&state, app.clone(), &edited.id, edited.clone()).unwrap();
@@ -583,7 +580,7 @@ fn pi_combined_one_mib_limit_rejects_enable_and_edit_without_database_or_file_ch
     home.shared(Some("SHARED_PI_SIZE_RULE"));
     PromptService::enable_prompt(&state, app.clone(), &original.id).unwrap();
     let large = preset("pi-large", &"x".repeat(1024 * 1024), false);
-    state.db.save_prompt(app.as_str(), &large).unwrap();
+    state.db.save_prompt(&app, &large).unwrap();
     let before_db = database_snapshot(&state, &app);
     let before_file = std::fs::read(live_path(&app)).unwrap();
 
@@ -608,14 +605,14 @@ fn pi_v93_appended_shared_blocks_preserve_active_edit_disable_and_strict_conflic
         let state = home.state();
         let app = AppType::Pi;
         let original = preset("pi-legacy", body, false);
-        state.db.save_prompt(app.as_str(), &original).unwrap();
+        state.db.save_prompt(&app, &original).unwrap();
         home.shared(Some("LEGACY_SHARED_PI"));
         let legacy = legacy93_shared(body, "LEGACY_SHARED_PI");
         write_text_file(&live_path(&app), &legacy).unwrap();
 
         assert!(PromptService::get_prompts(&state, app.clone()).unwrap()[&original.id].enabled);
         assert_eq!(
-            state.db.get_prompts(app.as_str()).unwrap()[&original.id].content,
+            state.db.get_prompts(&app).unwrap()[&original.id].content,
             body
         );
 
@@ -675,7 +672,7 @@ fn claude_v93_appended_shared_blocks_do_not_duplicate_direct_body_in_managed_mod
         let state = home.state();
         let app = AppType::Claude;
         let direct = preset("claude-legacy", body, true);
-        state.db.save_prompt(app.as_str(), &direct).unwrap();
+        state.db.save_prompt(&app, &direct).unwrap();
         home.shared(Some("LEGACY_SHARED_CLAUDE"));
         write_text_file(
             &live_path(&app),
@@ -722,7 +719,7 @@ fn missing_codex_shared_source_cannot_commit_partial_prompt_edits_or_activation(
     let current = preset("codex-current", "original active body", true);
     PromptService::upsert_prompt(&state, app.clone(), &current.id, current.clone()).unwrap();
     let other = preset("codex-other", "other saved body", false);
-    state.db.save_prompt(app.as_str(), &other).unwrap();
+    state.db.save_prompt(&app, &other).unwrap();
     home.shared(Some("CODEX_SHARED_SOURCE_TO_REMOVE"));
     let source = get_settings().shared_instruction_file.unwrap();
     std::fs::remove_file(source).unwrap();

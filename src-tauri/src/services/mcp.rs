@@ -639,7 +639,7 @@ impl McpService {
             _ => return ProviderMcpOverrides::default(),
         };
 
-        let provider = match db.get_provider_by_id(&provider_id, app.as_str()) {
+        let provider = match db.get_provider_by_id(&provider_id, app) {
             Ok(Some(p)) => p,
             _ => return ProviderMcpOverrides::default(),
         };
@@ -805,8 +805,8 @@ mod tests {
             "meta": {"resourceOverrides": {"mcp": overrides}}
         }))
         .unwrap();
-        state.db.save_provider(app.as_str(), &provider).unwrap();
-        state.db.set_current_provider(app.as_str(), id).unwrap();
+        state.db.save_provider(app, &provider).unwrap();
+        state.db.set_current_provider(app, id).unwrap();
         crate::settings::set_current_provider(app, Some(id)).unwrap();
     }
 
@@ -1053,8 +1053,11 @@ mod tests {
             }}}
         }))
         .unwrap();
-        state.db.save_provider("agy", &provider).unwrap();
-        state.db.set_current_provider("agy", &provider.id).unwrap();
+        state.db.save_provider(&AppType::Agy, &provider).unwrap();
+        state
+            .db
+            .set_current_provider(&AppType::Agy, &provider.id)
+            .unwrap();
         crate::settings::set_current_provider(&AppType::Agy, Some(&provider.id)).unwrap();
 
         let path = crate::agy_config::customizations_dir().join("mcp_config.json");

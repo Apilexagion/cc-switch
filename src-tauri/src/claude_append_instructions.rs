@@ -232,7 +232,7 @@ fn current_provider(db: &Database) -> Result<Option<Provider>, AppError> {
     else {
         return Ok(None);
     };
-    db.get_provider_by_id(&id, AppType::Claude.as_str())
+    db.get_provider_by_id(&id, &AppType::Claude)
 }
 
 fn configured_paths_match(left: &str, right: &str, config_dir: &Path) -> bool {
@@ -380,7 +380,7 @@ fn save_provider_config(
 
     // Validate and publish the runtime projection before committing the new selection.
     sync_runtime_projection_for_provider(Some(&next))?;
-    if let Err(error) = db.save_provider(AppType::Claude.as_str(), &next) {
+    if let Err(error) = db.save_provider(&AppType::Claude, &next) {
         if let Err(rollback_error) = sync_runtime_projection_for_provider(Some(&previous)) {
             log::error!("恢复 Claude append instructions 运行时投影失败: {rollback_error}");
         }
@@ -419,7 +419,7 @@ fn save_system_provider_config(
 
     // Validate both runtime projections before committing the new provider metadata.
     sync_runtime_projection_for_provider(Some(&next))?;
-    if let Err(error) = db.save_provider(AppType::Claude.as_str(), &next) {
+    if let Err(error) = db.save_provider(&AppType::Claude, &next) {
         if let Err(rollback_error) = sync_runtime_projection_for_provider(Some(&previous)) {
             log::error!("恢复 Claude system instructions 运行时投影失败: {rollback_error}");
         }
@@ -989,7 +989,7 @@ mod tests {
     }
 
     fn set_current(db: &Database, provider_id: &str) {
-        db.set_current_provider(AppType::Claude.as_str(), provider_id)
+        db.set_current_provider(&AppType::Claude, provider_id)
             .expect("set database current provider");
         crate::settings::set_current_provider(&AppType::Claude, Some(provider_id))
             .expect("set local current provider");
@@ -1142,9 +1142,9 @@ mod tests {
         let db = Database::memory().expect("create memory database");
         let provider_a = provider_with_config("claude-a", None);
         let provider_b = provider_with_config("claude-b", None);
-        db.save_provider(AppType::Claude.as_str(), &provider_a)
+        db.save_provider(&AppType::Claude, &provider_a)
             .expect("save provider a");
-        db.save_provider(AppType::Claude.as_str(), &provider_b)
+        db.save_provider(&AppType::Claude, &provider_b)
             .expect("save provider b");
         set_current(&db, "claude-a");
 
@@ -1176,7 +1176,7 @@ mod tests {
             .is_none());
 
         let untouched_b = db
-            .get_provider_by_id("claude-b", AppType::Claude.as_str())
+            .get_provider_by_id("claude-b", &AppType::Claude)
             .expect("read provider b")
             .expect("provider b");
         assert_eq!(provider_config(&untouched_b), Default::default());
@@ -1243,9 +1243,9 @@ mod tests {
                 active_file: Some("./b-system.md".to_string()),
             }),
         );
-        db.save_provider(AppType::Claude.as_str(), &provider_a)
+        db.save_provider(&AppType::Claude, &provider_a)
             .expect("save provider a");
-        db.save_provider(AppType::Claude.as_str(), &provider_b)
+        db.save_provider(&AppType::Claude, &provider_b)
             .expect("save provider b");
 
         set_current(&db, "claude-a");
@@ -1287,7 +1287,7 @@ mod tests {
                 active_file: Some("./active.md".to_string()),
             }),
         );
-        db.save_provider(AppType::Claude.as_str(), &provider)
+        db.save_provider(&AppType::Claude, &provider)
             .expect("save provider");
         set_current(&db, "claude-current");
         sync_current_provider_projection(&db).expect("seed projection");
@@ -1314,7 +1314,7 @@ mod tests {
                 active_file: Some("./system.md".to_string()),
             }),
         );
-        db.save_provider(AppType::Claude.as_str(), &provider)
+        db.save_provider(&AppType::Claude, &provider)
             .expect("save provider");
         set_current(&db, "claude-current");
         sync_current_provider_projection(&db).expect("seed system projection");
@@ -1345,7 +1345,7 @@ mod tests {
                 active_file: Some("shared.md".to_string()),
             }),
         );
-        db.save_provider(AppType::Claude.as_str(), &provider)
+        db.save_provider(&AppType::Claude, &provider)
             .expect("save provider");
         set_current(&db, "claude-current");
         sync_current_provider_projection(&db).expect("seed projections");
@@ -1380,7 +1380,7 @@ mod tests {
                 active_file: Some("./shared.md".to_string()),
             }),
         );
-        db.save_provider(AppType::Claude.as_str(), &provider)
+        db.save_provider(&AppType::Claude, &provider)
             .expect("save provider");
         set_current(&db, "claude-current");
         sync_current_provider_projection(&db).expect("seed projections");
@@ -1404,7 +1404,7 @@ mod tests {
         let _home = TempHome::new();
         let db = Database::memory().expect("create memory database");
         let provider = provider_with_config("claude-current", None);
-        db.save_provider(AppType::Claude.as_str(), &provider)
+        db.save_provider(&AppType::Claude, &provider)
             .expect("save provider");
         set_current(&db, "claude-current");
 
@@ -1414,7 +1414,7 @@ mod tests {
         assert_eq!(config.active_file.as_deref(), Some(imported_path.as_str()));
 
         let stored = db
-            .get_provider_by_id("claude-current", AppType::Claude.as_str())
+            .get_provider_by_id("claude-current", &AppType::Claude)
             .expect("read provider")
             .expect("provider exists");
         assert_eq!(provider_config(&stored), config);

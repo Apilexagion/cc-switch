@@ -26,6 +26,7 @@ fn require_fork_failover_provider(
     app_type: &str,
     provider_id: &str,
 ) -> Result<Provider, AppError> {
+    let app_type = &AppType::from_str(app_type)?;
     let provider = db
         .get_provider_by_id(provider_id, app_type)?
         .ok_or_else(|| AppError::InvalidInput(format!("供应商不存在: {provider_id}")))?;
@@ -42,6 +43,7 @@ fn filter_failover_queue_items(
     app_type: &str,
     queue: Vec<FailoverQueueItem>,
 ) -> Result<Vec<FailoverQueueItem>, AppError> {
+    let app_type = &AppType::from_str(app_type)?;
     let providers = db.get_all_providers(app_type)?;
     Ok(queue
         .into_iter()
@@ -53,7 +55,7 @@ fn filter_failover_queue_items(
         .collect())
 }
 
-fn filter_available_providers(app_type: &str, providers: Vec<Provider>) -> Vec<Provider> {
+fn filter_available_providers(app_type: &AppType, providers: Vec<Provider>) -> Vec<Provider> {
     providers
         .into_iter()
         .filter(|provider| {
@@ -90,6 +92,7 @@ fn filter_fork_failover_chain_items(
     app_type: &str,
     items: Vec<ForkFailoverChainItem>,
 ) -> Result<Vec<ForkFailoverChainItem>, AppError> {
+    let app_type = &AppType::from_str(app_type)?;
     let providers = db.get_all_providers(app_type)?;
     Ok(items
         .into_iter()
@@ -242,7 +245,7 @@ async fn get_available_providers_for_model_failover_internal(
     let providers = state
         .db
         .get_available_providers_for_model_failover(app_type, model_key)?;
-    Ok(filter_available_providers(app_type, providers))
+    Ok(filter_available_providers(&app, providers))
 }
 
 #[cfg_attr(not(feature = "test-hooks"), doc(hidden))]
@@ -308,7 +311,7 @@ async fn get_available_providers_for_fork_failover_chain_internal(
     let providers = state
         .db
         .get_available_providers_for_fork_failover_chain(app_type)?;
-    Ok(filter_available_providers(app_type, providers))
+    Ok(filter_available_providers(&app, providers))
 }
 
 #[cfg(test)]
@@ -317,19 +320,24 @@ mod tests {
         filter_available_providers, filter_failover_queue_items, filter_fork_failover_chain_items,
         normalize_fork_failover_chain_items, normalize_provider_ids, require_fork_failover_app,
     };
+    use crate::app_config::AppType;
     use crate::database::{
         Database, FailoverQueueItem, ForkFailoverChainItem, CODEX_OFFICIAL_PROVIDER_ID,
     };
     use crate::provider::Provider;
     use serde_json::json;
+    use std::str::FromStr;
 
     fn save_provider(db: &Database, app_type: &str, id: &str, name: &str, official: bool) {
         let mut provider = Provider::with_id(id.to_string(), name.to_string(), json!({}), None);
         if official {
             provider.category = Some("official".to_string());
         }
-        db.save_provider(app_type, &provider)
-            .expect("save provider");
+        db.save_provider(
+            &AppType::from_str(app_type).expect("valid app type"),
+            &provider,
+        )
+        .expect("save provider");
     }
 
     fn chain_item(node_type: &str, node_id: &str) -> ForkFailoverChainItem {
@@ -428,11 +436,11 @@ mod tests {
         assert_eq!(filtered_chain[1].node_id, "provider-a");
 
         let providers = db
-            .get_all_providers("codex")
+            .get_all_providers(&AppType::Codex)
             .expect("read providers")
             .into_values()
             .collect();
-        let available = filter_available_providers("codex", providers);
+        let available = filter_available_providers(&AppType::Codex, providers);
         assert_eq!(available.len(), 1);
         assert_eq!(available[0].id, "provider-a");
     }

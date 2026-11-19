@@ -2,10 +2,12 @@
 //!
 //! 从 dao/failover.rs 隔离出的 fork 独有逻辑，降低与上游合并冲突概率
 
+use crate::app_config::AppType;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::provider::Provider;
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 use super::failover::FailoverQueueItem;
 
@@ -95,7 +97,7 @@ impl Database {
         app_type: &str,
         model_key: &str,
     ) -> Result<Vec<Provider>, AppError> {
-        let all = self.get_all_providers(app_type)?;
+        let all = self.get_all_providers(&AppType::from_str(app_type)?)?;
         let existing = self
             .get_failover_queue_for_model(app_type, model_key)?
             .into_iter()
@@ -189,7 +191,7 @@ impl Database {
         &self,
         app_type: &str,
     ) -> Result<Vec<Provider>, AppError> {
-        let all = self.get_all_providers(app_type)?;
+        let all = self.get_all_providers(&AppType::from_str(app_type)?)?;
         let existing = self
             .get_fork_failover_chain(app_type)?
             .into_iter()
@@ -207,13 +209,18 @@ impl Database {
 #[cfg(test)]
 mod tests {
     use super::{Database, ForkFailoverChainItem};
+    use crate::app_config::AppType;
     use crate::provider::Provider;
     use serde_json::json;
+    use std::str::FromStr;
 
     fn save_provider(db: &Database, app_type: &str, id: &str, name: &str) {
         let provider = Provider::with_id(id.to_string(), name.to_string(), json!({}), None);
-        db.save_provider(app_type, &provider)
-            .expect("save provider in main database");
+        db.save_provider(
+            &AppType::from_str(app_type).expect("valid app type"),
+            &provider,
+        )
+        .expect("save provider in main database");
     }
 
     #[test]
