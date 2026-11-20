@@ -57,6 +57,7 @@ jobs:
               - "tailwind.config.cjs"
               - "postcss.config.cjs"
               - "components.json"
+              - "knip.json"
               - "README*.md"
               - ".github/workflows/**"
             backend:
@@ -96,6 +97,9 @@ jobs:
       - name: Check formatting
         shell: bash
         run: pnpm format:check 2>&1 | tee "$RUNNER_TEMP/frontend-format.log"
+
+      - name: Unused files, exports and dependencies
+        run: pnpm knip
 
       - name: Build frontend
         shell: bash

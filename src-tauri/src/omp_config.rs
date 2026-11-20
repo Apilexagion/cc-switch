@@ -1019,7 +1019,6 @@ pub(crate) mod test_support {
             Self::set(agent_dir, Some(dir))
         }
 
-        #[allow(dead_code)] // used only by tests; compiled-in outside cfg(test) via shared test_support
         pub(crate) fn at(agent_dir: &Path) -> Self {
             Self::set(agent_dir.to_path_buf(), None)
         }
