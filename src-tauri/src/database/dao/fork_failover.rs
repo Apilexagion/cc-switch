@@ -1,4 +1,4 @@
-//! Fork 扩展：模型族故障转移队列 & 混合故障转移链 DAO
+//! Fork 扩展：模型族故障转移队列 DAO
 //!
 //! 从 dao/failover.rs 隔离出的 fork 独有逻辑，降低与上游合并冲突概率
 
@@ -6,20 +6,9 @@ use crate::app_config::AppType;
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
 use crate::provider::Provider;
-use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use super::failover::FailoverQueueItem;
-
-/// Fork 混合故障转移链条目
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ForkFailoverChainItem {
-    pub node_type: String, // provider | route_mode
-    pub node_id: String,   // provider_id 或 route_mode
-    pub provider_name: Option<String>,
-    pub sort_index: Option<usize>,
-}
 
 impl Database {
     // ==================== 模型族独立故障转移队列（Fork 扩展） ====================
@@ -109,106 +98,11 @@ impl Database {
             .filter(|provider| !existing.contains(&provider.id))
             .collect())
     }
-
-    // ==================== Fork 混合故障转移链（Fork 扩展） ====================
-
-    /// 获取 Fork 混合故障转移链（provider + route_mode）
-    pub fn get_fork_failover_chain(
-        &self,
-        app_type: &str,
-    ) -> Result<Vec<ForkFailoverChainItem>, AppError> {
-        let conn = lock_conn!(self.conn);
-
-        let mut stmt = conn
-            .prepare(
-                "SELECT c.node_type, c.node_id, p.name, c.sort_index
-                 FROM forkdb.fork_failover_chain c
-                 LEFT JOIN main.providers p
-                   ON c.node_type = 'provider' AND p.id = c.node_id AND p.app_type = c.app_type
-                 WHERE c.app_type = ?1
-                 ORDER BY COALESCE(c.sort_index, 999999), c.node_type, c.node_id",
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
-
-        let items = stmt
-            .query_map([app_type], |row| {
-                Ok(ForkFailoverChainItem {
-                    node_type: row.get(0)?,
-                    node_id: row.get(1)?,
-                    provider_name: row.get(2)?,
-                    sort_index: row.get(3)?,
-                })
-            })
-            .map_err(|e| AppError::Database(e.to_string()))?
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| AppError::Database(e.to_string()))?;
-
-        Ok(items)
-    }
-
-    /// 覆盖写入 Fork 混合故障转移链
-    pub fn set_fork_failover_chain(
-        &self,
-        app_type: &str,
-        items: &[ForkFailoverChainItem],
-    ) -> Result<(), AppError> {
-        let mut conn = lock_conn!(self.conn);
-        let tx = conn
-            .transaction()
-            .map_err(|e| AppError::Database(e.to_string()))?;
-
-        tx.execute(
-            "DELETE FROM forkdb.fork_failover_chain WHERE app_type = ?1",
-            rusqlite::params![app_type],
-        )
-        .map_err(|e| AppError::Database(e.to_string()))?;
-
-        let now = chrono::Utc::now().to_rfc3339();
-        for (index, item) in items.iter().enumerate() {
-            let node_type = item.node_type.trim();
-            let node_id = item.node_id.trim();
-            if node_type != "provider" && node_type != "route_mode" {
-                return Err(AppError::Database(format!("非法 node_type: {node_type}")));
-            }
-            if node_id.is_empty() {
-                return Err(AppError::Database("node_id 不能为空".to_string()));
-            }
-            tx.execute(
-                "INSERT INTO forkdb.fork_failover_chain
-                 (app_type, node_type, node_id, sort_index, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                rusqlite::params![app_type, node_type, node_id, index as i64, &now],
-            )
-            .map_err(|e| AppError::Database(e.to_string()))?;
-        }
-
-        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
-        Ok(())
-    }
-
-    /// 获取可添加到 Fork 混合链的供应商（排除已在链中的 provider 节点）
-    pub fn get_available_providers_for_fork_failover_chain(
-        &self,
-        app_type: &str,
-    ) -> Result<Vec<Provider>, AppError> {
-        let all = self.get_all_providers(&AppType::from_str(app_type)?)?;
-        let existing = self
-            .get_fork_failover_chain(app_type)?
-            .into_iter()
-            .filter(|item| item.node_type == "provider")
-            .map(|item| item.node_id)
-            .collect::<std::collections::HashSet<_>>();
-
-        Ok(all
-            .into_values()
-            .filter(|provider| !existing.contains(&provider.id))
-            .collect())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Database, ForkFailoverChainItem};
+    use super::Database;
     use crate::app_config::AppType;
     use crate::provider::Provider;
     use serde_json::json;
@@ -237,39 +131,5 @@ mod tests {
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].provider_id, "provider-a");
         assert_eq!(queue[0].provider_name, "Provider A");
-    }
-
-    #[test]
-    fn fork_failover_chain_reads_provider_name_from_main_database() {
-        let db = Database::memory().expect("memory database");
-        save_provider(&db, "claude", "provider-b", "Provider B");
-
-        db.set_fork_failover_chain(
-            "claude",
-            &[
-                ForkFailoverChainItem {
-                    node_type: "provider".to_string(),
-                    node_id: "provider-b".to_string(),
-                    provider_name: None,
-                    sort_index: None,
-                },
-                ForkFailoverChainItem {
-                    node_type: "route_mode".to_string(),
-                    node_id: "__claude_route_mode_virtual__".to_string(),
-                    provider_name: None,
-                    sort_index: None,
-                },
-            ],
-        )
-        .expect("save fork failover chain");
-
-        let chain = db
-            .get_fork_failover_chain("claude")
-            .expect("read fork failover chain");
-        assert_eq!(chain.len(), 2);
-        assert_eq!(chain[0].node_type, "provider");
-        assert_eq!(chain[0].provider_name.as_deref(), Some("Provider B"));
-        assert_eq!(chain[1].node_type, "route_mode");
-        assert!(chain[1].provider_name.is_none());
     }
 }

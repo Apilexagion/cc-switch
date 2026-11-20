@@ -1922,9 +1922,6 @@ pub fn run() {
             commands::get_failover_queue_for_model,
             commands::get_available_providers_for_model_failover,
             commands::set_failover_queue_for_model,
-            commands::get_fork_failover_chain,
-            commands::set_fork_failover_chain,
-            commands::get_available_providers_for_fork_failover_chain,
             // Skill management (legacy API compatibility)
             commands::get_skill_repos,
             commands::add_skill_repo,

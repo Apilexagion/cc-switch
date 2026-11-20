@@ -39,7 +39,6 @@ pub(crate) use dao::providers_seed::{
 };
 pub(crate) use dao::proxy::{PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 pub use dao::FailoverQueueItem;
-pub use dao::ForkFailoverChainItem;
 pub use dao::Profile;
 
 use crate::config::{get_app_config_dir, get_fork_db_path};

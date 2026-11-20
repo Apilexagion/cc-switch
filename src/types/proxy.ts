@@ -161,13 +161,6 @@ export interface ProviderHealth {
   updated_at: string;
 }
 
-export interface ForkFailoverChainItem {
-  nodeType: "provider" | "route_mode";
-  nodeId: string;
-  providerName?: string | null;
-  sortIndex?: number;
-}
-
 // 故障转移队列条目
 export interface FailoverQueueItem {
   providerId: string;

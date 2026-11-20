@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::database::Database;
-use crate::omp_config::test_support::TestAgentDir as OmpTestAgentDir;
 use crate::pi_config::test_support::TestAgentDir;
 use crate::provider::{ProviderMeta, ProviderPromptOverrides, ProviderResourceOverrides};
 use crate::settings::{get_settings, reload_settings, update_settings, AppSettings};
@@ -39,7 +38,6 @@ struct TempHome {
     dir: tempfile::TempDir,
     previous_env: Vec<(&'static str, Option<OsString>)>,
     _pi: TestAgentDir,
-    _omp: OmpTestAgentDir,
 }
 
 impl TempHome {
@@ -63,13 +61,12 @@ impl TempHome {
         }
         // Pi also has a test-only override, which wins over both settings and
         // PI_CODING_AGENT_DIR. Isolate all three resolution paths explicitly.
+        // OMP uses the ordinary isolated settings override below.
         let pi = TestAgentDir::at(&dir.path().join("pi"));
-        let omp = OmpTestAgentDir::at(&dir.path().join("omp"));
         let home = Self {
             dir,
             previous_env,
             _pi: pi,
-            _omp: omp,
         };
         reload_settings().expect("reload settings under isolated home");
         let path = |name: &str| Some(home.dir.path().join(name).to_string_lossy().into_owned());

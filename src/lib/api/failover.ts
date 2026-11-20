@@ -1,9 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  ProviderHealth,
-  FailoverQueueItem,
-  ForkFailoverChainItem,
-} from "@/types/proxy";
+import type { ProviderHealth, FailoverQueueItem } from "@/types/proxy";
 
 export interface Provider {
   id: string;
@@ -93,26 +89,5 @@ export const failoverApi = {
     enabled: boolean,
   ): Promise<void> {
     return invoke("set_auto_failover_enabled", { appType, enabled });
-  },
-
-  async getForkFailoverChain(
-    appType: string,
-  ): Promise<ForkFailoverChainItem[]> {
-    return invoke("get_fork_failover_chain", { appType });
-  },
-
-  async setForkFailoverChain(
-    appType: string,
-    items: ForkFailoverChainItem[],
-  ): Promise<void> {
-    return invoke("set_fork_failover_chain", { appType, items });
-  },
-
-  async getAvailableProvidersForForkFailoverChain(
-    appType: string,
-  ): Promise<Provider[]> {
-    return invoke("get_available_providers_for_fork_failover_chain", {
-      appType,
-    });
   },
 };
