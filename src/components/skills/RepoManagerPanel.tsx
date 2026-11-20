@@ -31,7 +31,6 @@ import {
   skillRepositoryKey,
   skillRepositoryLabel,
   skillRepositoryUrl,
-  type SkillRepositoryRef,
 } from "@/lib/skillRepository";
 import {
   RepoTokenSection,
@@ -55,10 +54,6 @@ interface RepoManagerPanelProps {
   /** 访问令牌区（读私有仓库用）；不传就不显示 */
   tokens?: Omit<RepoTokenSectionProps, "knownHosts">;
   onClose: () => void;
-}
-
-export function parseRepoUrl(url: string): SkillRepositoryRef | null {
-  return parseSkillRepositoryUrl(url);
 }
 
 /**

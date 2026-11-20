@@ -259,13 +259,6 @@ export interface RequestRewriteConfig {
   systemPrompt: SystemPromptRule;
 }
 
-export const EMPTY_REQUEST_REWRITE: RequestRewriteConfig = {
-  enabled: false,
-  modelMap: [],
-  paramOverrides: {},
-  systemPrompt: { mode: "off", text: "" },
-};
-
 /** 响应侧单个钩子（onResponse / onEvent 各一份），默认关闭、脚本为空。 */
 export interface ResponseHookConfig {
   enabled: boolean;
@@ -340,11 +333,6 @@ export interface IntentRoutingConfig {
   rules: IntentRule[];
 }
 
-export const EMPTY_INTENT_ROUTING: IntentRoutingConfig = {
-  enabled: false,
-  rules: [],
-};
-
 // ==================== 局域网网关（Fork 扩展，默认关闭） ====================
 
 /** 列表视图：token 已脱敏为末 4 位（`••••abcd`），用于管理界面展示。 */
@@ -375,7 +363,6 @@ export interface GatewayKey {
 
 /** 配额窗口可选值。 */
 export const GATEWAY_LIMIT_WINDOWS = ["none", "day", "week", "month"] as const;
-export type GatewayLimitWindow = (typeof GATEWAY_LIMIT_WINDOWS)[number];
 
 // ==================== 出站请求脱敏（Fork 扩展，默认关闭） ====================
 

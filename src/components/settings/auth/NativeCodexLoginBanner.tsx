@@ -96,5 +96,3 @@ export function NativeCodexLoginBanner({
     </div>
   );
 }
-
-export default NativeCodexLoginBanner;

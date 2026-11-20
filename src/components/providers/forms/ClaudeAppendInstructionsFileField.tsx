@@ -767,5 +767,3 @@ function ClaudeInstructionsFileField({
     </div>
   );
 }
-
-export default ClaudeAppendInstructionsFileField;

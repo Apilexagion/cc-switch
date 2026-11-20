@@ -350,7 +350,7 @@ export function useClaudeModelRoutingSettings(enabled = true) {
 }
 
 export { useSetClaudeModelRoutingSettings as useUpdateClaudeModelRoutingSettings };
-export function useSetClaudeModelRoutingSettings() {
+function useSetClaudeModelRoutingSettings() {
   const queryClient = useQueryClient();
   const { t } = useTranslation();
 

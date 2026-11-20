@@ -188,5 +188,3 @@ export function ReliabilityPanel({ appType }: ReliabilityPanelProps) {
     </div>
   );
 }
-
-export default ReliabilityPanel;

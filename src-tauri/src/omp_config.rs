@@ -1004,7 +1004,7 @@ pub(crate) fn update_omp_mcp_document_and_commit<T>(
 
 #[cfg(test)]
 pub(crate) mod test_support {
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
 
     pub(crate) struct TestAgentDir {
         _dir: Option<tempfile::TempDir>,
@@ -1017,10 +1017,6 @@ pub(crate) mod test_support {
             let agent_dir = dir.path().join("agent");
             std::fs::create_dir_all(&agent_dir).expect("create Oh My Pi agent directory");
             Self::set(agent_dir, Some(dir))
-        }
-
-        pub(crate) fn at(agent_dir: &Path) -> Self {
-            Self::set(agent_dir.to_path_buf(), None)
         }
 
         fn set(agent_dir: PathBuf, dir: Option<tempfile::TempDir>) -> Self {

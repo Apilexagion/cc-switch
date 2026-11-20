@@ -3,10 +3,6 @@ import type { ClaudeSystemInstructionsConfig } from "@/types";
 import type { ClaudeAppendInstructionsFileStatus } from "./claudeAppendInstructions";
 
 export type { ClaudeSystemInstructionsConfig } from "@/types";
-export type {
-  ClaudeAppendInstructionsFileState as ClaudeSystemInstructionsFileState,
-  ClaudeAppendInstructionsFileStatus as ClaudeSystemInstructionsFileStatus,
-} from "./claudeAppendInstructions";
 
 export const claudeSystemInstructionsApi = {
   async getConfig(): Promise<ClaudeSystemInstructionsConfig> {

@@ -9294,7 +9294,7 @@ mod tests {
     struct TestHomeGuard {
         home: PathBuf,
         _env: EnvVars,
-        _omp_dir: crate::omp_config::test_support::TestAgentDir,
+        previous_omp_dir: Option<String>,
     }
     impl TestHomeGuard {
         fn set(home: &Path) -> Self {
@@ -9302,13 +9302,31 @@ mod tests {
                 .set("DSH_HOME", home.join(".dsh"))
                 .set("CC_SWITCH_TEST_HOME", home)
                 .set("KIMI_CODE_HOME", home.join(".kimi-code"));
-            Self {
+            let mut settings = crate::settings::get_settings();
+            let previous_omp_dir = settings.omp_config_dir.replace(
+                home.join(".omp")
+                    .join("agent")
+                    .to_string_lossy()
+                    .into_owned(),
+            );
+            let guard = Self {
                 home: home.to_path_buf(),
                 _env: env,
-                _omp_dir: crate::omp_config::test_support::TestAgentDir::at(
-                    &home.join(".omp").join("agent"),
-                ),
-            }
+                previous_omp_dir,
+            };
+            assert_settings_write_isolated(&guard);
+            crate::settings::update_settings(settings).expect("set isolated Oh My Pi directory");
+            guard
+        }
+    }
+    impl Drop for TestHomeGuard {
+        fn drop(&mut self) {
+            // Drop runs before `_env`, so restoring the cached override still writes
+            // only this test home's settings.json, never the caller's settings file.
+            assert_settings_write_isolated(self);
+            let mut settings = crate::settings::get_settings();
+            settings.omp_config_dir = self.previous_omp_dir.take();
+            let _ = crate::settings::update_settings(settings);
         }
     }
 
@@ -9734,8 +9752,13 @@ mod tests {
             let agent = temp.path().join(".agents");
             let _pi_alias = matches!(app, AppType::Pi)
                 .then(|| crate::pi_config::test_support::TestAgentDir::at(&agent));
-            let _omp_alias = matches!(app, AppType::Omp)
-                .then(|| crate::omp_config::test_support::TestAgentDir::at(&agent));
+            if matches!(app, AppType::Omp) {
+                assert_settings_write_isolated(&_home);
+                let mut settings = crate::settings::get_settings();
+                settings.omp_config_dir = Some(agent.to_string_lossy().into_owned());
+                crate::settings::update_settings(settings).expect("alias Oh My Pi to unified root");
+                assert_eq!(crate::omp_config::get_omp_agent_dir().unwrap(), agent);
+            }
 
             let db = std::sync::Arc::new(Database::memory().expect("memory db"));
             let skill = poisoned_skill("owner/repo:skill", "test-skill");
@@ -9777,7 +9800,11 @@ mod tests {
         let _location = StorageLocationGuard::set(&home, SkillStorageLocation::CcSwitch);
         let agent = temp.path().join("shared-agent");
         let _pi_dir = crate::pi_config::test_support::TestAgentDir::at(&agent);
-        let _omp_dir = crate::omp_config::test_support::TestAgentDir::at(&agent);
+        assert_settings_write_isolated(&home);
+        let mut settings = crate::settings::get_settings();
+        settings.omp_config_dir = Some(agent.to_string_lossy().into_owned());
+        crate::settings::update_settings(settings).expect("share Pi and Oh My Pi native root");
+        assert_eq!(crate::omp_config::get_omp_agent_dir().unwrap(), agent);
         let db = Arc::new(Database::memory().unwrap());
         let skill = poisoned_skill("local:test-skill", "test-skill");
         db.save_skill(&skill).unwrap();

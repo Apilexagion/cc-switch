@@ -3,7 +3,6 @@ import { failoverApi } from "@/lib/api/failover";
 import { toast } from "@/lib/toast";
 import { useTranslation } from "react-i18next";
 import { extractErrorMessage } from "@/utils/errorUtils";
-import type { ForkFailoverChainItem } from "@/types/proxy";
 import { proxyKeys } from "@/lib/query/proxy";
 import { getAppLabel } from "@/config/appConfig";
 
@@ -270,48 +269,6 @@ export function useSetFailoverQueueForModel() {
         ],
       });
       queryClient.invalidateQueries({ queryKey: ["proxyStatus"] });
-    },
-  });
-}
-
-export function useForkFailoverChain(appType: string) {
-  return useQuery({
-    queryKey: ["forkFailoverChain", appType],
-    queryFn: () => failoverApi.getForkFailoverChain(appType),
-    enabled: !!appType,
-  });
-}
-
-export function useAvailableProvidersForForkFailoverChain(appType: string) {
-  return useQuery({
-    queryKey: ["availableProvidersForForkFailoverChain", appType],
-    queryFn: () =>
-      failoverApi.getAvailableProvidersForForkFailoverChain(appType),
-    enabled: !!appType,
-  });
-}
-
-export function useSetForkFailoverChain() {
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({
-      appType,
-      items,
-    }: {
-      appType: string;
-      items: ForkFailoverChainItem[];
-    }) => failoverApi.setForkFailoverChain(appType, items),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: ["forkFailoverChain", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["availableProvidersForForkFailoverChain", variables.appType],
-      });
-      queryClient.invalidateQueries({
-        queryKey: ["proxyStatus"],
-      });
     },
   });
 }
