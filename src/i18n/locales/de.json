@@ -204,7 +204,9 @@
       "agySwitchTitle": "Dadurch wird die Anmeldung von agy gewechselt",
       "agySwitchBody": "Vor dem Öffnen wechselt die Anmeldung von agy zu {{account}}; danach gestartete agy-Sitzungen verwenden dieses Konto.",
       "agySwitchRunning": "agy läuft: Geöffnete agy-Sitzungen behalten das vorherige Konto und schreiben es möglicherweise zurück. Beenden Sie sie nach Möglichkeit zuerst.",
-      "isolationBodyCopilot": "copilot startet in diesem Terminal mit --model auf das erste Modell von „{{name}}“, nur für diese Sitzung. Endpunkt und Schlüssel stammen aus der providers.json von Copilot, daher können andere Terminals es ebenfalls mit /model auswählen."
+      "isolationBodyCopilot": "copilot startet in diesem Terminal mit --model auf das erste Modell von „{{name}}“, nur für diese Sitzung. Endpunkt und Schlüssel stammen aus der providers.json von Copilot, daher können andere Terminals es ebenfalls mit /model auswählen.",
+      "agyBindingMissing": "Das mit dieser Karte verknüpfte Antigravity-Konto fehlt auf diesem Computer. Füge es unter „Konten“ hinzu oder verwende für diesen Start die aktuelle agy-Anmeldung.",
+      "agyUseCurrentLogin": "Aktuelle agy-Anmeldung für diesen Start verwenden"
     },
     "name": "Name",
     "namePlaceholder": "z. B. Claude Official",
@@ -397,7 +399,8 @@
     },
     "providerResourcesSynced": "Provider resources synced",
     "proxyReasonClaudeDesktop": "Using Claude Desktop local routing mode",
-    "providerResourcesWarning": "Configuration applied, but some provider resources failed to sync"
+    "providerResourcesWarning": "Configuration applied, but some provider resources failed to sync",
+    "omoVariantCleanupFailed": "Erfolgreich gewechselt, aber die Konfigurationsdatei der anderen OMO-Variante (OMO / OMO Slim) konnte nicht entfernt werden, daher lädt OpenCode möglicherweise beide; lösche sie im OpenCode-Konfigurationsverzeichnis"
   },
   "confirm": {
     "deleteProvider": "Anbieter löschen",
@@ -3645,7 +3648,8 @@
         "checkPermission": "Bitte Verzeichnisberechtigungen prüfen",
         "uninstallFirst": "Bitte zuerst den vorhandenen Skill mit demselben Namen deinstallieren",
         "checkZipContent": "Bitte prüfen, ob die ZIP-Datei gültige Skill-Verzeichnisse (mit SKILL.md-Dateien) enthält"
-      }
+      },
+      "downloadStalled": "Download des Repositorys {{owner}}/{{name}} abgebrochen: {{timeout}} s lang keine Daten empfangen"
     },
     "repo": {
       "title": "Skill-Repositories verwalten",
@@ -4736,7 +4740,8 @@
     },
     "needsAttention": "Erfordert Aufmerksamkeit",
     "back": "Zurück",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "skills": "Skills"
   },
   "appsPage": {
     "showInSidebar": "{{name}} in der Seitenleiste anzeigen",
@@ -5978,5 +5983,11 @@
     "promptPlaceholder": "Select a prompt",
     "followGlobalIfMissing": "Use the global prompt when no prompt is selected",
     "noPrompt": "No prompts are available for this app."
+  },
+  "unreadableEntry": {
+    "title": "„{{name}}“ kann nicht gelesen werden",
+    "hint": "Möglicherweise von einer neueren CC-Switch-Version gespeichert. Die Daten bleiben unverändert erhalten und können nicht bearbeitet oder aktiviert werden; ein Update stellt sie wieder her, oder du löschst den Eintrag.",
+    "confirmTitle": "Unlesbaren Eintrag löschen",
+    "confirmMessage": "„{{name}}“ löschen? Nur dieser CC-Switch-Eintrag wird entfernt; die Konfigurationsdateien der Apps bleiben unverändert."
   }
 }

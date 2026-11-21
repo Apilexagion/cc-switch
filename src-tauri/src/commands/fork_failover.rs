@@ -44,7 +44,9 @@ fn filter_failover_queue_items(
     queue: Vec<FailoverQueueItem>,
 ) -> Result<Vec<FailoverQueueItem>, AppError> {
     let app_type = &AppType::from_str(app_type)?;
-    let providers = db.get_all_providers(app_type)?;
+    let providers = db
+        .get_provider_rows(app_type)?
+        .into_readable("模型族故障转移队列");
     Ok(queue
         .into_iter()
         .filter(|item| {

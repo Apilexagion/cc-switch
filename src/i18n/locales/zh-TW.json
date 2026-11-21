@@ -204,7 +204,9 @@
       "agySwitchTitle": "會切換 agy 的登入",
       "agySwitchBody": "開啟前把 agy 的登入切換到 {{account}}，之後新開的 agy 都用這個帳號。",
       "agySwitchRunning": "偵測到 agy 正在執行：已開啟的 agy 仍使用原帳號，還可能把原帳號寫回去，最好先結束它們。",
-      "isolationBodyCopilot": "這個終端機裡的 copilot 以 --model 選中「{{name}}」的第一個模型，只對這次工作階段生效；位址和 Key 讀自 Copilot 的 providers.json，在別的終端機裡也能用 /model 選到它。"
+      "isolationBodyCopilot": "這個終端機裡的 copilot 以 --model 選中「{{name}}」的第一個模型，只對這次工作階段生效；位址和 Key 讀自 Copilot 的 providers.json，在別的終端機裡也能用 /model 選到它。",
+      "agyBindingMissing": "這張卡片綁定的 Antigravity 帳號不在本機。你可以在授權中心新增該帳號，或本次使用 agy 目前的登入帳號。",
+      "agyUseCurrentLogin": "本次使用 agy 目前的登入帳號"
     },
     "name": "名稱",
     "namePlaceholder": "例如：Claude 官方",
@@ -397,7 +399,8 @@
     },
     "proxyReasonClaudeDesktop": "使用 Claude Desktop 本機路由模式",
     "providerResourcesWarning": "設定已生效，但部分供應商資源同步失敗",
-    "providerResourcesSynced": "供應商資源已同步"
+    "providerResourcesSynced": "供應商資源已同步",
+    "omoVariantCleanupFailed": "切換成功，但未能刪除另一個 OMO 變體（OMO / OMO Slim）的設定檔，OpenCode 可能同時載入兩者；請在 OpenCode 設定目錄中手動刪除它"
   },
   "confirm": {
     "deleteProvider": "刪除供應商",
@@ -3645,7 +3648,8 @@
         "checkPermission": "請檢查目錄權限",
         "uninstallFirst": "請先解除安裝已安裝的同名技能",
         "checkZipContent": "請確認 ZIP 檔案包含有效的技能目錄（含 SKILL.md 檔案）"
-      }
+      },
+      "downloadStalled": "下載儲存庫 {{owner}}/{{name}} 時連續 {{timeout}} 秒沒有收到資料，已中止"
     },
     "repo": {
       "title": "管理技能儲存庫",
@@ -4736,7 +4740,8 @@
     },
     "needsAttention": "需要處理",
     "back": "返回",
-    "plugins": "外掛"
+    "plugins": "外掛",
+    "skills": "Skills"
   },
   "appsPage": {
     "showInSidebar": "在側欄顯示 {{name}}",
@@ -5978,5 +5983,11 @@
     "promptPlaceholder": "请选择 Prompt",
     "followGlobalIfMissing": "未选择时回退到全局 Prompt",
     "noPrompt": "当前应用还没有可用 Prompt。"
+  },
+  "unreadableEntry": {
+    "title": "「{{name}}」的資料無法讀取",
+    "hint": "可能由較新版本的 CC Switch 寫入。資料已原樣保留，無法編輯或啟用；升級後即可恢復，也可以刪除。",
+    "confirmTitle": "刪除無法讀取的項目",
+    "confirmMessage": "刪除「{{name}}」？只刪除 CC Switch 中的這筆記錄，不變更各應用自己的設定檔。"
   }
 }

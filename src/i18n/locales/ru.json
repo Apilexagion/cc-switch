@@ -204,7 +204,9 @@
       "agySwitchTitle": "Будет переключён вход agy",
       "agySwitchBody": "Перед открытием вход agy переключится на {{account}}, и запущенные после этого сессии agy будут использовать этот аккаунт.",
       "agySwitchRunning": "agy запущен: открытые сессии agy останутся на прежнем аккаунте и могут записать его обратно. По возможности сначала закройте их.",
-      "isolationBodyCopilot": "copilot в этом терминале запускается с --model на первой модели «{{name}}» только для этого сеанса. Адрес и ключ берутся из providers.json Copilot, поэтому в других терминалах её тоже можно выбрать через /model."
+      "isolationBodyCopilot": "copilot в этом терминале запускается с --model на первой модели «{{name}}» только для этого сеанса. Адрес и ключ берутся из providers.json Copilot, поэтому в других терминалах её тоже можно выбрать через /model.",
+      "agyBindingMissing": "Аккаунт Antigravity, привязанный к этой карточке, отсутствует на этом компьютере. Добавьте его в разделе «Аккаунты» или используйте текущий аккаунт agy для этого запуска.",
+      "agyUseCurrentLogin": "Использовать текущий аккаунт agy для этого запуска"
     },
     "name": "Название",
     "namePlaceholder": "например, Claude Official",
@@ -397,7 +399,8 @@
     },
     "providerResourcesWarning": "Configuration applied, but some provider resources failed to sync",
     "providerResourcesSynced": "Provider resources synced",
-    "proxyReasonClaudeDesktop": "Using Claude Desktop local routing mode"
+    "proxyReasonClaudeDesktop": "Using Claude Desktop local routing mode",
+    "omoVariantCleanupFailed": "Переключение выполнено, но не удалось удалить файл конфигурации другого варианта OMO (OMO / OMO Slim), поэтому OpenCode может загрузить оба; удалите его вручную из каталога конфигурации OpenCode"
   },
   "confirm": {
     "deleteProvider": "Удалить провайдера",
@@ -3643,7 +3646,8 @@
         "checkPermission": "Проверьте права доступа к каталогу",
         "uninstallFirst": "Сначала удалите существующий навык с таким же именем",
         "checkZipContent": "Проверьте, что ZIP-файл содержит корректные каталоги навыков (с файлами SKILL.md)"
-      }
+      },
+      "downloadStalled": "Загрузка репозитория {{owner}}/{{name}} остановилась: нет данных в течение {{timeout}} с"
     },
     "repo": {
       "title": "Управление репозиториями навыков",
@@ -4734,7 +4738,8 @@
     },
     "needsAttention": "Требует внимания",
     "back": "Назад",
-    "plugins": "Плагины"
+    "plugins": "Плагины",
+    "skills": "Навыки"
   },
   "appsPage": {
     "showInSidebar": "Показывать {{name}} в боковой панели",
@@ -5976,5 +5981,11 @@
     "promptPlaceholder": "Select a prompt",
     "followGlobalIfMissing": "Use the global prompt when no prompt is selected",
     "noPrompt": "No prompts are available for this app."
+  },
+  "unreadableEntry": {
+    "title": "Не удаётся прочитать «{{name}}»",
+    "hint": "Возможно, запись сохранена более новой версией CC Switch. Данные сохранены без изменений, их нельзя редактировать или включить; обновление восстановит их, либо запись можно удалить.",
+    "confirmTitle": "Удалить нечитаемую запись",
+    "confirmMessage": "Удалить «{{name}}»? Будет удалена только эта запись CC Switch; собственные файлы конфигурации приложений не изменятся."
   }
 }

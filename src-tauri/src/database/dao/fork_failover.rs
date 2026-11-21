@@ -86,7 +86,9 @@ impl Database {
         app_type: &str,
         model_key: &str,
     ) -> Result<Vec<Provider>, AppError> {
-        let all = self.get_all_providers(&AppType::from_str(app_type)?)?;
+        let all = self
+            .get_provider_rows(&AppType::from_str(app_type)?)?
+            .into_readable("模型族故障转移候选供应商");
         let existing = self
             .get_failover_queue_for_model(app_type, model_key)?
             .into_iter()
@@ -131,5 +133,42 @@ mod tests {
         assert_eq!(queue.len(), 1);
         assert_eq!(queue[0].provider_id, "provider-a");
         assert_eq!(queue[0].provider_name, "Provider A");
+    }
+
+    #[test]
+    fn model_failover_queries_skip_unreadable_rows_without_rewriting_them() {
+        let db = Database::memory().expect("memory database");
+        for id in ["queued", "unreadable", "available"] {
+            save_provider(&db, "codex", id, id);
+        }
+        db.set_failover_queue_for_model("codex", "gpt", &["queued".into(), "unreadable".into()])
+            .unwrap();
+        db.conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE providers SET meta = '{' WHERE app_type = 'codex' AND id = 'unreadable'",
+                [],
+            )
+            .unwrap();
+
+        let available = db
+            .get_available_providers_for_model_failover("codex", "gpt")
+            .unwrap();
+        assert_eq!(
+            available.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+            ["available"]
+        );
+        let raw: String = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT meta FROM providers WHERE app_type = 'codex' AND id = 'unreadable'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(raw, "{");
     }
 }

@@ -204,7 +204,9 @@
       "agySwitchTitle": "This switches agy's sign-in",
       "agySwitchBody": "Before opening, agy's sign-in switches to {{account}}, and agy sessions started afterwards use this account.",
       "agySwitchRunning": "agy is running: open agy sessions keep the previous account and may write it back. Quit them first if you can.",
-      "isolationBodyCopilot": "copilot in this terminal starts with --model set to the first model of \"{{name}}\", for this session only. The endpoint and key come from Copilot's providers.json, so other terminals can pick it with /model too."
+      "isolationBodyCopilot": "copilot in this terminal starts with --model set to the first model of \"{{name}}\", for this session only. The endpoint and key come from Copilot's providers.json, so other terminals can pick it with /model too.",
+      "agyBindingMissing": "The Antigravity account bound to this card is missing on this computer. Add it in Auth Center or use agy's current sign-in for this launch.",
+      "agyUseCurrentLogin": "Use agy's current sign-in for this launch"
     },
     "name": "Name",
     "namePlaceholder": "e.g., Claude Official",
@@ -397,7 +399,8 @@
     },
     "proxyReasonClaudeDesktop": "Using Claude Desktop local routing mode",
     "providerResourcesWarning": "Configuration applied, but some provider resources failed to sync",
-    "providerResourcesSynced": "Provider resources synced"
+    "providerResourcesSynced": "Provider resources synced",
+    "omoVariantCleanupFailed": "Switched successfully, but the other OMO variant's config file (OMO / OMO Slim) could not be removed, so OpenCode may load both; delete it from the OpenCode config directory"
   },
   "confirm": {
     "deleteProvider": "Delete Provider",
@@ -3645,7 +3648,8 @@
         "checkPermission": "Please check directory permissions",
         "uninstallFirst": "Please uninstall the existing skill with the same name first",
         "checkZipContent": "Please verify the ZIP file contains valid skill directories (with SKILL.md files)"
-      }
+      },
+      "downloadStalled": "Download of repository {{owner}}/{{name}} stalled: no data received for {{timeout}}s"
     },
     "repo": {
       "title": "Manage Skill Repositories",
@@ -4736,7 +4740,8 @@
     },
     "needsAttention": "Needs attention",
     "back": "Back",
-    "plugins": "Plugins"
+    "plugins": "Plugins",
+    "skills": "Skills"
   },
   "appsPage": {
     "showInSidebar": "Show {{name}} in the sidebar",
@@ -5978,5 +5983,11 @@
     "promptPlaceholder": "Select a prompt",
     "followGlobalIfMissing": "Use the global prompt when no prompt is selected",
     "noPrompt": "No prompts are available for this app."
+  },
+  "unreadableEntry": {
+    "title": "“{{name}}” can't be read",
+    "hint": "It may have been saved by a newer version of CC Switch. The stored data is kept as is and can't be edited or enabled; upgrading restores it, or you can delete it.",
+    "confirmTitle": "Delete unreadable entry",
+    "confirmMessage": "Delete “{{name}}”? Only this CC Switch record is removed; the apps' own config files are not changed."
   }
 }

@@ -43,6 +43,9 @@ pub fn map_proxy_error_to_status(error: &ProxyError) -> u16 {
         // 重试耗尽：503 Service Unavailable
         ProxyError::MaxRetriesExceeded => 503,
 
+        // 入站请求体或解压后体积超过上限：413 Payload Too Large
+        ProxyError::RequestBodyTooLarge(_) => 413,
+
         // 配置错误/无效请求：400 Bad Request
         ProxyError::ConfigError(_) | ProxyError::InvalidRequest(_) => 400,
 
@@ -124,6 +127,10 @@ mod tests {
 
     #[test]
     fn test_map_status_matches_proxy_error_response_semantics() {
+        assert_eq!(
+            map_proxy_error_to_status(&ProxyError::RequestBodyTooLarge(1024)),
+            413
+        );
         assert_eq!(
             map_proxy_error_to_status(&ProxyError::CodexQuotaProtection("protected".to_string())),
             403

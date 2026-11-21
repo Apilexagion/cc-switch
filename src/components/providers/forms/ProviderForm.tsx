@@ -3158,7 +3158,7 @@ function ProviderFormFull({
             />
           )}
 
-          {/* 切号只实现了 macOS、Windows；别的平台上不显示，卡上已有的绑定原样保留 */}
+          {/* 仅在支持切号的平台显示账号选择，卡上已有的绑定原样保留 */}
           {appId === "agy" &&
             category === "official" &&
             canSwitchAgyAccount() && (
