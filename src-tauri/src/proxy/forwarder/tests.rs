@@ -627,6 +627,7 @@ fn local_proxy_body_overrides_deep_merge_final_body_without_stream() {
             },
             "messages": []
         })),
+        ..Default::default()
     };
 
     assert!(apply_local_proxy_body_overrides(&mut body, &overrides));
@@ -664,6 +665,7 @@ fn local_proxy_header_overrides_replace_allowed_headers_only() {
             ("X-Bad".to_string(), "bad\nvalue".to_string()),
         ]),
         body: None,
+        ..Default::default()
     };
 
     apply_local_proxy_header_overrides(&mut headers, Some(&overrides), false);
@@ -703,6 +705,7 @@ fn local_proxy_header_overrides_are_skipped_for_copilot() {
     let overrides = LocalProxyRequestOverrides {
         headers: HashMap::from([("User-Agent".to_string(), "custom".to_string())]),
         body: None,
+        ..Default::default()
     };
 
     apply_local_proxy_header_overrides(&mut headers, Some(&overrides), true);
@@ -3044,6 +3047,106 @@ mod codex_stack {
         upstream.seen.lock().await.pop().expect("upstream request")
     }
 
+    #[tokio::test]
+    async fn responses_rules_and_observation_use_the_configured_native_wire_request() {
+        let upstream = upstream().await;
+        let fwd = forwarder(false);
+        let mut control = provider(&upstream, "openai_responses");
+        control.meta.as_mut().unwrap().local_proxy_request_overrides =
+            Some(LocalProxyRequestOverrides {
+                headers: HashMap::from([
+                    ("Session-ID".into(), "override-session".into()),
+                    ("X-Session-ID".into(), "override-x-session".into()),
+                    ("X-Example".into(), "before-rules".into()),
+                ]),
+                body: Some(json!({
+                    "prompt_cache_key": "override-cache", "user": null, "temperature": 0.25
+                })),
+                ..Default::default()
+            });
+        let mut configured = control.clone();
+        configured.id = "responses-rules-probe".into();
+        assert!(responses_fields::observe(&configured.id).is_none());
+        let meta = configured.meta.as_mut().unwrap();
+        meta.local_proxy_request_overrides
+            .as_mut()
+            .unwrap()
+            .responses_rules = serde_json::from_value(json!({
+            "removeHeaders": ["Session-ID", " X-Session-ID ", "Session_Id", "Authorization"],
+            "removeBodyFields": ["prompt_cache_key", "stream", "session_id"],
+            "setHeaders": {"X-Example": "after-rules"},
+            "setBodyFields": {"temperature": 0.75}
+        }))
+        .unwrap();
+
+        let mut request = body(
+            "listed",
+            json!([{
+                "type": "function", "name": "kept_tool", "parameters": {"type": "object"}
+            }]),
+        );
+        request["stream"] = json!(true);
+        request["prompt_cache_key"] = json!("client-cache");
+        request["session_id"] = json!("keep");
+
+        for endpoint in ["/responses?key=value", "/v1/responses/compact"] {
+            let mut expected =
+                send(&fwd, &upstream, control.clone(), endpoint, request.clone()).await;
+            assert_eq!(expected.headers["session-id"], "override-session");
+            assert_eq!(expected.headers["x-session-id"], "override-x-session");
+            assert_eq!(expected.headers["session_id"], "session-1");
+            assert_eq!(expected.headers["authorization"], "Bearer sk-third-party");
+            assert_eq!(expected.headers["x-example"], "before-rules");
+            assert_eq!(expected.body["prompt_cache_key"], "override-cache");
+            assert_eq!(expected.body["temperature"], 0.25);
+            assert_eq!(expected.body["session_id"], "keep");
+            assert_eq!(expected.body["stream"], true);
+            assert_eq!(expected.body["tools"][0]["name"], "kept_tool");
+            assert_eq!(expected.body.get("user"), Some(&Value::Null));
+            expected.headers.remove("session-id");
+            expected.headers.remove("x-session-id");
+            expected
+                .headers
+                .insert("x-example", HeaderValue::from_static("after-rules"));
+            expected.body["temperature"] = json!(0.75);
+            expected
+                .body
+                .as_object_mut()
+                .unwrap()
+                .remove("prompt_cache_key");
+
+            let sent = send(
+                &fwd,
+                &upstream,
+                configured.clone(),
+                endpoint,
+                request.clone(),
+            )
+            .await;
+            assert_eq!(sent.headers, expected.headers);
+            assert_eq!(sent.body, expected.body);
+
+            let sample =
+                serde_json::to_value(responses_fields::observe(&configured.id).unwrap()).unwrap();
+            let headers = sample["headers"].as_array().unwrap();
+            assert!(!headers.iter().any(|field| field["name"] == "x-session-id"));
+            let fields = sample["bodyFields"].as_array().unwrap();
+            assert!(!fields
+                .iter()
+                .any(|field| field["name"] == "prompt_cache_key"));
+            assert!(fields
+                .iter()
+                .any(|field| field["name"] == "temperature" && field["preview"] == 0.75));
+        }
+
+        configured.meta.as_mut().unwrap().api_format = Some("openai_chat".into());
+        let converted = send(&fwd, &upstream, configured, "/responses", request).await;
+        assert_eq!(converted.headers["x-session-id"], "override-x-session");
+        assert_eq!(converted.headers["x-example"], "before-rules");
+        assert_eq!(converted.body["prompt_cache_key"], "override-cache");
+        assert_eq!(converted.body["temperature"], 0.25);
+    }
+
     /// 隐私过滤在转发器出口执行：转换成哪种上游格式都过滤，CC Switch 自己包装的
     /// 压缩摘要也过滤；工具结果仍跟随子开关。工具定义的说明文字不碰（Claude Code 的
     /// Bash 工具说明里有 `noreply@anthropic.com`，模型会照抄进提交信息）。
@@ -3156,6 +3259,7 @@ mod codex_stack {
                 Some(crate::provider::LocalProxyRequestOverrides {
                     headers: Default::default(),
                     body: Some(json!({ "instructions": "我的密码是 Hunter2xyz" })),
+                    ..Default::default()
                 });
             let seen = send(
                 &forwarder(false).privacy_filter(PrivacyFilterConfig {
@@ -5109,6 +5213,7 @@ mod bookkeeping {
             local_proxy_request_overrides: Some(crate::provider::LocalProxyRequestOverrides {
                 headers: Default::default(),
                 body: Some(json!({ "system": "我的密码是 Hunter2xyz" })),
+                ..Default::default()
             }),
             ..Default::default()
         });

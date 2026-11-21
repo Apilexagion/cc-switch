@@ -18,6 +18,7 @@ import { providerSchema, type ProviderFormData } from "@/lib/schemas/provider";
 import {
   buildLocalProxyRequestOverrides,
   formatRequestOverrideObject,
+  formatResponsesRulesDraft,
 } from "@/lib/requestOverrides";
 import { providersApi, type AppId, type AuthCenterTarget } from "@/lib/api";
 import type { ProviderEditorInactiveField } from "@/lib/api/providers";
@@ -577,6 +578,9 @@ function ProviderFormFull({
         initialData?.meta?.localProxyRequestOverrides?.body,
       ),
     );
+    setResponsesRules(
+      formatResponsesRulesDraft(initialData?.meta?.localProxyRequestOverrides),
+    );
     setClaudeStackRows(initialClaudeStackRows(initialData?.meta?.stackModels));
   }, [appId, initialData, supportsFullUrl]);
 
@@ -843,6 +847,9 @@ function ProviderFormFull({
       formatRequestOverrideObject(
         initialData?.meta?.localProxyRequestOverrides?.body,
       ),
+  );
+  const [responsesRules, setResponsesRules] = useState(() =>
+    formatResponsesRulesDraft(initialData?.meta?.localProxyRequestOverrides),
   );
   // Stack 模式：Claude Code 的模型列表存在 meta.stackModels；Codex 复用模型目录。`null` 表示
   // 没配列表，显示（后端也按它发布）模型映射里的模型，跟着映射变；动过列表才存。
@@ -1482,6 +1489,7 @@ function ProviderFormFull({
       ? buildLocalProxyRequestOverrides(
           localProxyHeadersOverride,
           localProxyBodyOverride,
+          appId === "codex" && !isCopilotProvider ? responsesRules : undefined,
         )
       : {};
     if (overridesResult.error) {
@@ -3114,6 +3122,11 @@ function ProviderFormFull({
               onLocalProxyHeadersOverrideChange={setLocalProxyHeadersOverride}
               localProxyBodyOverride={localProxyBodyOverride}
               onLocalProxyBodyOverrideChange={setLocalProxyBodyOverride}
+              responsesRulesEditor={{
+                providerId,
+                value: responsesRules,
+                onChange: setResponsesRules,
+              }}
               variant={useStackLayout ? "stack" : "classic"}
               directModeFormatNotice={directModeFormatNotice}
             />

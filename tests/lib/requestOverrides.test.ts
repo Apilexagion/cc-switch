@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildLocalProxyRequestOverrides,
+  formatResponsesRulesDraft,
   isProtectedLocalProxyHeaderName,
   isValidHttpHeaderName,
   isValidHttpHeaderValue,
   parseBodyOverrideJson,
   parseHeaderOverrideJson,
   parseRequestOverrideJson,
+  parseResponsesRulesDraft,
 } from "@/lib/requestOverrides";
 
 describe("requestOverrides", () => {
@@ -26,6 +28,122 @@ describe("requestOverrides", () => {
         body: { temperature: 0.2 },
       },
     });
+  });
+
+  it("parses mixed final rules without changing ordinary overrides", () => {
+    const responsesRules = {
+      setHeaders: { "x-client": "" },
+      setBodyFields: { temperature: 0.2, store: false, user: null },
+      removeHeaders: ["session-id"],
+      removeBodyFields: ["prompt_cache_key"],
+    };
+    expect(
+      buildLocalProxyRequestOverrides(
+        '{ "Session-ID": "from-override" }',
+        '{ "user": null }',
+        [
+          {
+            target: "header",
+            name: " Session-ID ",
+            action: "remove",
+            value: "",
+          },
+          { target: "header", name: "X-Client", action: "set", value: "" },
+          {
+            target: "body",
+            name: "prompt_cache_key",
+            action: "remove",
+            value: "",
+          },
+          { target: "body", name: "temperature", action: "set", value: "0.2" },
+          { target: "body", name: "store", action: "set", value: "false" },
+          { target: "body", name: "user", action: "set", value: "null" },
+          {
+            target: "header",
+            name: "authorization",
+            action: "keep",
+            value: "",
+          },
+        ],
+      ),
+    ).toEqual({
+      overrides: {
+        headers: { "session-id": "from-override" },
+        body: { user: null },
+        responsesRules,
+      },
+    });
+    expect(
+      parseResponsesRulesDraft(formatResponsesRulesDraft({ responsesRules })),
+    ).toEqual({ rules: responsesRules });
+    expect(
+      buildLocalProxyRequestOverrides(
+        "",
+        "",
+        formatResponsesRulesDraft(undefined),
+      ),
+    ).toEqual({});
+  });
+
+  it("reloads legacy removal lists", () => {
+    expect(
+      formatResponsesRulesDraft({
+        responsesRemovals: {
+          removeHeaders: ["Session-ID"],
+          removeBodyFields: ["prompt_cache_key"],
+        },
+      }),
+    ).toEqual([
+      { target: "header", name: "session-id", action: "remove", value: "" },
+      { target: "body", name: "prompt_cache_key", action: "remove", value: "" },
+    ]);
+  });
+
+  it.each([
+    "Authorization",
+    "Session_Id",
+    "Cookie",
+    "Accept",
+    "bad header",
+    "x-custom-api-key",
+  ])("rejects managed or invalid header rules: %s", (name) => {
+    expect(
+      parseResponsesRulesDraft([
+        { target: "header", name, action: "remove", value: "" },
+      ]).error,
+    ).toBeTruthy();
+  });
+
+  it.each(["stream", "session_id", "model", "input", "_private"])(
+    "rejects protected body replacements: %s",
+    (name) => {
+      expect(
+        parseResponsesRulesDraft([
+          { target: "body", name, action: "set", value: "null" },
+        ]).error,
+      ).toBeTruthy();
+    },
+  );
+
+  it("rejects duplicate header actions and invalid body replacement JSON", () => {
+    expect(
+      parseResponsesRulesDraft([
+        { target: "header", name: "Session-ID", action: "remove", value: "" },
+        {
+          target: "header",
+          name: "session-id",
+          action: "set",
+          value: "different",
+        },
+      ]).error,
+    ).toContain("Duplicate rule");
+    for (const value of ["", "unquoted text", "1e999"]) {
+      expect(
+        parseResponsesRulesDraft([
+          { target: "body", name: "temperature", action: "set", value },
+        ]).error,
+      ).toContain("valid JSON");
+    }
   });
 
   it("rejects non-object body overrides", () => {

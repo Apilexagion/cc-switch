@@ -10,6 +10,7 @@ mod managed_auth;
 mod opencode;
 mod request_body;
 mod response_check;
+pub(crate) mod responses_fields;
 mod send;
 
 use super::hyper_client::{ProxyResponse, MAX_RESPONSE_BODY_BYTES};
@@ -609,8 +610,8 @@ impl RequestForwarder {
             self.apply_privacy_filter(app_type, body, "override");
         }
         LocalProxyRequestOverrides {
-            headers: Default::default(),
             body,
+            ..Default::default()
         }
     }
 
@@ -2719,12 +2720,12 @@ impl RequestForwarder {
         // 过滤私有参数（以 `_` 开头的字段），防止内部信息泄露到上游
         // 默认使用空白名单，过滤所有 _ 前缀字段
         let mut filtered_body = prepare_upstream_request_body(request_body);
+        let local_proxy_overrides = provider
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.local_proxy_request_overrides.as_ref());
         if !is_copilot {
-            if let Some(overrides) = provider
-                .meta
-                .as_ref()
-                .and_then(|meta| meta.local_proxy_request_overrides.as_ref())
-            {
+            if let Some(overrides) = local_proxy_overrides {
                 let redacted_overrides;
                 let overrides = if self.privacy_filter.enabled && overrides.body.is_some() {
                     redacted_overrides = self.privacy_filtered_overrides(app_type, overrides);
@@ -2781,8 +2782,7 @@ impl RequestForwarder {
                 .await;
         }
 
-        // Fork 扩展：出站请求脱敏（PII / secret redaction）。放在最后——所有改写/脚本定稿后、
-        // 转发前——的唯一收口点，确保连用户脚本注入的内容也一并打码。默认关闭、fail-open。
+        // Fork 扩展：在改写/脚本定稿后对正文脱敏。最终 Responses 规则补入的字段另过相同过滤。
         if self.pii_redaction.is_active() {
             let hits = crate::proxy::pii_redaction::apply_pii_redaction(
                 &mut filtered_body,
@@ -2793,7 +2793,7 @@ impl RequestForwarder {
             }
         }
 
-        // 请求体到这里定稿；之后只读不改（日志哈希、序列化）
+        // 最后一次全文隐私过滤；供应商的最终替换只对补入的内容另做隐私过滤。
         self.apply_privacy_filter(app_type, &mut filtered_body, "upstream");
         // 出站 body 定稿后刷新真值（覆盖 Codex chat 上游模型覆写、转换层模型改写）
         if let Some(m) = filtered_body
@@ -2804,14 +2804,6 @@ impl RequestForwarder {
             outbound_model = Some(m.to_string());
         }
         self.set_last_outbound_model(outbound_model.clone());
-        log_prompt_cache_trace(
-            app_type,
-            provider,
-            &effective_endpoint,
-            resolved_claude_api_format.as_deref(),
-            &filtered_body,
-            self.session_client_provided,
-        );
         let request_is_streaming =
             is_streaming_request(&effective_endpoint, &filtered_body, headers);
         let force_identity_encoding = needs_transform
@@ -2998,6 +2990,53 @@ impl RequestForwarder {
         }
         .build(headers);
 
+        // 确保 content-type 存在
+        if !ordered_headers.contains_key(http::header::CONTENT_TYPE) {
+            ordered_headers.insert(
+                http::header::CONTENT_TYPE,
+                http::HeaderValue::from_static("application/json"),
+            );
+        }
+
+        apply_local_proxy_header_overrides(&mut ordered_headers, local_proxy_overrides, is_copilot);
+
+        // 托管 OAuth 的 workspace 由账号绑定决定，覆盖客户端或本地代理配置的旧值。
+        if let Some(ref account_id) = codex_oauth_account_id {
+            if let Ok(value) = http::HeaderValue::from_str(account_id) {
+                ordered_headers.insert("chatgpt-account-id", value);
+            }
+        }
+
+        // Match the selected upstream wire format, not just the incoming Codex route:
+        // converted Chat Completions / Messages requests must not use these rules.
+        let native_codex_responses = !is_copilot
+            && matches!(app_type, AppType::Codex)
+            && method == http::Method::POST
+            && codex_upstream_format == Some(CodexUpstreamFormat::NativeResponses);
+        if let Some(rules) = local_proxy_overrides
+            .map(|overrides| &overrides.responses_rules)
+            .filter(|rules| native_codex_responses && !rules.is_empty())
+        {
+            responses_fields::apply_rules(
+                rules,
+                &mut ordered_headers,
+                &mut filtered_body,
+                |patch| {
+                    if self.pii_redaction.is_active() {
+                        super::pii_redaction::apply_pii_redaction(patch, &self.pii_redaction);
+                    }
+                    self.apply_privacy_filter(app_type, patch, "responses rule");
+                },
+            );
+        }
+        log_prompt_cache_trace(
+            app_type,
+            provider,
+            &effective_endpoint,
+            resolved_claude_api_format.as_deref(),
+            &filtered_body,
+            self.session_client_provided,
+        );
         // 序列化请求体。GET/HEAD 是 idempotent/safe 方法，按 HTTP 语义不应携带 body；
         // 强行附带 JSON body 会让某些上游（如 Google Gemini 的 models.list）拒绝请求。
         let body_bytes = if matches!(method, &http::Method::GET | &http::Method::HEAD) {
@@ -3007,30 +3046,6 @@ impl RequestForwarder {
                 ProxyError::Internal(format!("Failed to serialize request body: {e}"))
             })?
         };
-
-        // 确保 content-type 存在
-        if !ordered_headers.contains_key(http::header::CONTENT_TYPE) {
-            ordered_headers.insert(
-                http::header::CONTENT_TYPE,
-                http::HeaderValue::from_static("application/json"),
-            );
-        }
-
-        apply_local_proxy_header_overrides(
-            &mut ordered_headers,
-            provider
-                .meta
-                .as_ref()
-                .and_then(|meta| meta.local_proxy_request_overrides.as_ref()),
-            is_copilot,
-        );
-
-        // 托管 OAuth 的 workspace 由账号绑定决定，覆盖客户端或本地代理配置的旧值。
-        if let Some(ref account_id) = codex_oauth_account_id {
-            if let Ok(value) = http::HeaderValue::from_str(account_id) {
-                ordered_headers.insert("chatgpt-account-id", value);
-            }
-        }
 
         reject_proxy_placeholder_for_managed_account_upstream(&url, &ordered_headers)?;
 
@@ -3102,6 +3117,9 @@ impl RequestForwarder {
             attempt.prepared(&filtered_body, &secrets);
         }
 
+        if native_codex_responses {
+            responses_fields::record(&provider.id, &ordered_headers, &filtered_body);
+        }
         let response = self
             .send_upstream(
                 &url,
