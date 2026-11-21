@@ -2,7 +2,7 @@ use http::header::{HeaderValue, InvalidHeaderValue};
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 
 use crate::provider_kind::ProviderKind;
 
@@ -620,41 +620,11 @@ pub struct LocalProxyRequestOverrides {
     pub headers: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
-    #[serde(
-        default,
-        rename = "responsesRules",
-        alias = "responsesRemovals",
-        skip_serializing_if = "LocalProxyResponsesRules::is_empty"
-    )]
-    pub responses_rules: LocalProxyResponsesRules,
 }
 
 impl LocalProxyRequestOverrides {
     pub fn is_empty(&self) -> bool {
-        self.headers.is_empty() && self.body.is_none() && self.responses_rules.is_empty()
-    }
-}
-
-/// Final, per-provider edits for native Codex Responses upstreams.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct LocalProxyResponsesRules {
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub set_headers: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub set_body_fields: BTreeMap<String, Value>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub remove_headers: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub remove_body_fields: Vec<String>,
-}
-
-impl LocalProxyResponsesRules {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.set_headers.is_empty()
-            && self.set_body_fields.is_empty()
-            && self.remove_headers.is_empty()
-            && self.remove_body_fields.is_empty()
+        self.headers.is_empty() && self.body.is_none()
     }
 }
 
@@ -1536,7 +1506,6 @@ mod tests {
             local_proxy_request_overrides: Some(LocalProxyRequestOverrides {
                 headers: HashMap::from([("X-Test".to_string(), "yes".to_string())]),
                 body: Some(json!({ "temperature": 0.2 })),
-                ..Default::default()
             }),
             ..ProviderMeta::default()
         };
@@ -1550,53 +1519,12 @@ mod tests {
             value["localProxyRequestOverrides"]["body"]["temperature"],
             0.2
         );
-        assert!(value["localProxyRequestOverrides"]
-            .get("responsesRules")
-            .is_none());
 
         let decoded: ProviderMeta =
             serde_json::from_value(value).expect("deserialize ProviderMeta");
         let overrides = decoded.local_proxy_request_overrides.unwrap();
         assert_eq!(overrides.headers.get("X-Test"), Some(&"yes".to_string()));
         assert_eq!(overrides.body.unwrap()["temperature"], 0.2);
-    }
-
-    #[test]
-    fn provider_meta_roundtrips_responses_rules_without_overrides() {
-        let value = json!({
-            "localProxyRequestOverrides": {
-                "responsesRules": {
-                    "setHeaders": {"x-test": "replacement"},
-                    "setBodyFields": {"temperature": 0.2, "previous_response_id": null},
-                    "removeHeaders": ["session-id", "x-session-id"],
-                    "removeBodyFields": ["prompt_cache_key"]
-                }
-            }
-        });
-        let meta: ProviderMeta = serde_json::from_value(value.clone()).unwrap();
-        assert!(!meta
-            .local_proxy_request_overrides
-            .as_ref()
-            .unwrap()
-            .is_empty());
-        assert_eq!(serde_json::to_value(meta).unwrap(), value);
-    }
-
-    #[test]
-    fn provider_meta_reads_legacy_responses_removals() {
-        let legacy = json!({
-            "localProxyRequestOverrides": {
-                "responsesRemovals": {"removeHeaders": ["x-session-id"]}
-            }
-        });
-        let meta: ProviderMeta = serde_json::from_value(legacy).unwrap();
-        let encoded = serde_json::to_value(meta).unwrap();
-        let rules = &encoded["localProxyRequestOverrides"];
-        assert_eq!(
-            rules["responsesRules"]["removeHeaders"],
-            json!(["x-session-id"])
-        );
-        assert!(rules.get("responsesRemovals").is_none());
     }
 
     #[test]

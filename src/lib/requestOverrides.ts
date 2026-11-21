@@ -1,7 +1,4 @@
-import type {
-  LocalProxyRequestOverrides,
-  LocalProxyResponsesRules,
-} from "@/types";
+import type { LocalProxyRequestOverrides } from "@/types";
 
 export interface RequestOverrideJsonResult {
   value?: Record<string, unknown>;
@@ -11,13 +8,6 @@ export interface RequestOverrideJsonResult {
 export interface HeaderOverrideValidationResult {
   headers?: Record<string, string>;
   error?: string;
-}
-
-export interface ResponsesRuleDraft {
-  target: "header" | "body";
-  name: string;
-  action: "keep" | "set" | "remove";
-  value: string;
 }
 
 // RFC 9110 HTTP field-name token. Keep this aligned with Rust's
@@ -166,139 +156,9 @@ export function formatRequestOverrideObject(
   return JSON.stringify(value, null, 2);
 }
 
-export function formatResponsesRulesDraft(
-  overrides: LocalProxyRequestOverrides | undefined,
-): ResponsesRuleDraft[] {
-  const rules = overrides?.responsesRules ?? overrides?.responsesRemovals;
-  if (!rules) return [];
-
-  // If an imported file contains both actions, show the winning removal.
-  const rows = new Map<string, ResponsesRuleDraft>();
-  const put = (row: ResponsesRuleDraft) => {
-    const name = normalizedResponsesRuleName(row);
-    rows.set(`${row.target}:${name}`, { ...row, name });
-  };
-  for (const [name, value] of Object.entries(rules.setHeaders ?? {})) {
-    put({ target: "header", name, action: "set", value });
-  }
-  for (const [name, value] of Object.entries(rules.setBodyFields ?? {})) {
-    put({
-      target: "body",
-      name,
-      action: "set",
-      value: JSON.stringify(value) ?? "",
-    });
-  }
-  for (const name of rules.removeHeaders ?? []) {
-    put({ target: "header", name, action: "remove", value: "" });
-  }
-  for (const name of rules.removeBodyFields ?? []) {
-    put({ target: "body", name, action: "remove", value: "" });
-  }
-  return [...rows.values()];
-}
-
-export function normalizedResponsesRuleName({
-  target,
-  name,
-}: Pick<ResponsesRuleDraft, "target" | "name">): string {
-  const trimmed = name.trim();
-  return target === "header" ? trimmed.toLowerCase() : trimmed;
-}
-
-function looksLikeCredentialName(name: string): boolean {
-  // Matches proxy/forwarder/responses_fields.rs. Raw credentials are never
-  // observed, and recognized credential fields cannot be edited by these rules.
-  return (
-    /api[-_.]?key/.test(name.toLowerCase()) ||
-    name
-      .toLowerCase()
-      .split(/[-_.]/)
-      .some((part) =>
-        [
-          "auth",
-          "authorization",
-          "authentication",
-          "token",
-          "secret",
-          "password",
-          "cookie",
-          "credential",
-        ].includes(part),
-      )
-  );
-}
-
-export function parseResponsesRulesDraft(draft: ResponsesRuleDraft[]): {
-  rules?: LocalProxyResponsesRules;
-  error?: string;
-} {
-  const seen = new Set<string>();
-  const removeHeaders: string[] = [];
-  const removeBodyFields: string[] = [];
-  const setHeaders = new Map<string, string>();
-  const setBodyFields = new Map<string, unknown>();
-  for (const row of draft) {
-    if (row.action === "keep") continue;
-    const name = normalizedResponsesRuleName(row);
-    if (!name) return { error: "Field name must not be empty" };
-    if (row.target === "header" && !isValidHttpHeaderName(row.name.trim())) {
-      return { error: `Header "${name}" name is not a valid HTTP token` };
-    }
-    if (
-      looksLikeCredentialName(name) ||
-      (row.target === "header"
-        ? isProtectedLocalProxyHeaderName(name) ||
-          ["accept", "content-encoding"].includes(name)
-        : name.startsWith("_") ||
-          /\p{Cc}/u.test(name) ||
-          ["model", "input", "stream", "session_id"].includes(name))
-    ) {
-      return { error: `Managed field "${name}" cannot be changed` };
-    }
-    const key = `${row.target}:${name}`;
-    if (seen.has(key)) return { error: `Duplicate rule for "${name}"` };
-    seen.add(key);
-
-    if (row.action === "remove") {
-      (row.target === "header" ? removeHeaders : removeBodyFields).push(name);
-    } else if (row.target === "header") {
-      if (!isValidHttpHeaderValue(row.value)) {
-        return { error: `Header "${name}" value contains control characters` };
-      }
-      setHeaders.set(name, row.value);
-    } else {
-      try {
-        // Preserve JSON types; literal null is a value, not a removal.
-        setBodyFields.set(
-          name,
-          JSON.parse(row.value, (_key, value) => {
-            if (typeof value === "number" && !Number.isFinite(value))
-              throw new Error("invalid number");
-            return value;
-          }),
-        );
-      } catch {
-        return {
-          error: `Body field "${name}" replacement must be a valid JSON value`,
-        };
-      }
-    }
-  }
-
-  const rules: LocalProxyResponsesRules = {};
-  if (setHeaders.size) rules.setHeaders = Object.fromEntries(setHeaders);
-  if (setBodyFields.size)
-    rules.setBodyFields = Object.fromEntries(setBodyFields);
-  if (removeHeaders.length) rules.removeHeaders = removeHeaders;
-  if (removeBodyFields.length) rules.removeBodyFields = removeBodyFields;
-  return seen.size ? { rules } : {};
-}
-
 export function buildLocalProxyRequestOverrides(
   headersJson: string,
   bodyJson: string,
-  responsesRulesDraft?: ResponsesRuleDraft[],
 ): { overrides?: LocalProxyRequestOverrides; error?: string } {
   const headerResult = parseHeaderOverrideJson(headersJson);
   if (headerResult.error) {
@@ -316,11 +176,6 @@ export function buildLocalProxyRequestOverrides(
   }
   if (bodyResult.value && Object.keys(bodyResult.value).length > 0) {
     overrides.body = bodyResult.value;
-  }
-  if (responsesRulesDraft) {
-    const { rules, error } = parseResponsesRulesDraft(responsesRulesDraft);
-    if (error) return { error };
-    if (rules) overrides.responsesRules = rules;
   }
 
   return Object.keys(overrides).length > 0 ? { overrides } : {};

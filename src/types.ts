@@ -201,19 +201,9 @@ export interface CodexChatReasoning {
 
 export type PromptCacheRoutingMode = "auto" | "enabled" | "disabled";
 
-export interface LocalProxyResponsesRules {
-  setHeaders?: Record<string, string>;
-  setBodyFields?: Record<string, unknown>;
-  removeHeaders?: string[];
-  removeBodyFields?: string[];
-}
-
 export interface LocalProxyRequestOverrides {
   headers?: Record<string, string>;
   body?: Record<string, unknown>;
-  responsesRules?: LocalProxyResponsesRules;
-  /** Compatibility with settings containing only the original removal lists. */
-  responsesRemovals?: LocalProxyResponsesRules;
 }
 
 export interface ClaudeAppendInstructionsConfig {

@@ -1958,7 +1958,6 @@ pub fn run() {
             commands::get_request_logs,
             commands::get_request_detail,
             commands::get_request_diagnostics,
-            commands::observe_codex_responses_fields,
             commands::get_request_diagnostics_config,
             commands::set_request_diagnostics_config,
             commands::get_model_pricing,

@@ -4,7 +4,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentProps,
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -99,7 +98,6 @@ import {
   type FetchedModelSelection,
 } from "./FetchedModelPicker";
 import { LocalProxyRequestOverridesField } from "./LocalProxyRequestOverridesField";
-import { ResponsesRequestRulesField } from "./ResponsesRequestRulesField";
 import { CodexInstructionsFileField } from "./CodexInstructionsFileField";
 import { ModelAliasEditor } from "./ModelAliasEditor";
 import type { ModelAliasEntry } from "@/utils/modelAliases";
@@ -278,7 +276,6 @@ interface CodexFormFieldsProps {
   onLocalProxyHeadersOverrideChange: (value: string) => void;
   localProxyBodyOverride: string;
   onLocalProxyBodyOverrideChange: (value: string) => void;
-  responsesRulesEditor?: ComponentProps<typeof ResponsesRequestRulesField>;
 
   /**
    * 布局：`classic` 是直连 / 路由用的完整表单；`stack` 是 Stack 模式的简化面板（连接 +
@@ -741,7 +738,6 @@ export function CodexFormFields({
   onLocalProxyHeadersOverrideChange,
   localProxyBodyOverride,
   onLocalProxyBodyOverrideChange,
-  responsesRulesEditor,
   variant = "classic",
   directModeFormatNotice,
 }: CodexFormFieldsProps) {
@@ -805,9 +801,7 @@ export function CodexFormFields({
   // 高级区在有任何可见配置时自动展开（仅折叠→展开，不会自动折叠）：自定义 UA /
   // 请求覆盖 / 非默认的上游格式 / 已配置思考能力。模型列表在高级区外面，不算。
   const hasRequestOverrides = Boolean(
-    localProxyHeadersOverride.trim() ||
-      localProxyBodyOverride.trim() ||
-      responsesRulesEditor?.value.some((row) => row.action !== "keep"),
+    localProxyHeadersOverride.trim() || localProxyBodyOverride.trim(),
   );
   const hasAnyAdvancedValue =
     isCopilotPreset ||
@@ -1780,11 +1774,6 @@ export function CodexFormFields({
           })}
         />
       </div>
-      {responsesRulesEditor && (
-        <div className="border-t border-border pt-3">
-          <ResponsesRequestRulesField {...responsesRulesEditor} />
-        </div>
-      )}
     </>
   );
 

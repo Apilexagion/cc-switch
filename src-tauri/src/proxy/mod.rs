@@ -56,5 +56,4 @@ mod tests_issue_7271;
 
 pub use circuit_breaker::CircuitBreakerConfig;
 pub use error::ProxyError;
-pub(crate) use forwarder::responses_fields;
 pub use session::extract_session_id;

@@ -29,27 +29,6 @@ export interface RequestDiagnostics {
   attemptsTruncated: boolean;
 }
 
-export interface ResponsesFieldSummary {
-  name: string;
-  kind:
-    | "header"
-    | "null"
-    | "boolean"
-    | "number"
-    | "string"
-    | "array"
-    | "object";
-  editable: boolean;
-  preview?: number | boolean | string;
-}
-
-export interface ResponsesFieldsSnapshot {
-  observedAtMs: number;
-  headers: ResponsesFieldSummary[];
-  bodyFields: ResponsesFieldSummary[];
-  truncated: boolean;
-}
-
 export const requestDiagnosticsApi = {
   get: (requestId: string): Promise<RequestDiagnostics | null> =>
     invoke("get_request_diagnostics", { requestId }),
@@ -57,8 +36,4 @@ export const requestDiagnosticsApi = {
     invoke("get_request_diagnostics_config"),
   setConfig: (config: DiagnosticsConfig): Promise<void> =>
     invoke("set_request_diagnostics_config", { config }),
-  observeCodexResponsesFields: (
-    providerId: string,
-  ): Promise<ResponsesFieldsSnapshot | null> =>
-    invoke("observe_codex_responses_fields", { providerId }),
 };

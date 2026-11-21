@@ -1,19 +1,11 @@
 use crate::{
     proxy::diagnostics::{self, DiagnosticsConfig, RequestDiagnostics},
-    proxy::responses_fields::{self, ResponsesFieldsSnapshot},
     store::AppState,
 };
 
 #[tauri::command]
 pub fn get_request_diagnostics(request_id: String) -> Option<RequestDiagnostics> {
     diagnostics::get(&request_id)
-}
-
-#[tauri::command]
-pub(crate) fn observe_codex_responses_fields(
-    provider_id: String,
-) -> Option<ResponsesFieldsSnapshot> {
-    responses_fields::observe(&provider_id)
 }
 
 #[tauri::command]

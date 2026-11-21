@@ -5,7 +5,6 @@ import {
   ProviderForm,
   type ProviderFormValues,
 } from "@/components/providers/forms/ProviderForm";
-import { requestDiagnosticsApi } from "@/lib/api/requestDiagnostics";
 import type { ProviderCategory, ProviderMeta } from "@/types";
 import type { AppMode } from "@/types/proxy";
 import { createTestQueryClient } from "../utils/testQueryClient";
@@ -320,93 +319,6 @@ describe("ProviderForm Stack layout (Codex)", () => {
   beforeEach(() => {
     settingsState.enableStackMode = true;
   });
-
-  it.each(["route", "stack"] as const)(
-    "observes, selects, saves and clears provider-specific Responses rules in %s mode",
-    async (modeView) => {
-      const onSubmit = vi.fn();
-      const overrides = {
-        headers: { "x-example": "keep" },
-        body: { user: null },
-      };
-      const observe = vi
-        .spyOn(requestDiagnosticsApi, "observeCodexResponsesFields")
-        .mockResolvedValue({
-          observedAtMs: 123,
-          headers: [{ name: "x-session-id", kind: "header", editable: true }],
-          bodyFields: [
-            {
-              name: "temperature",
-              kind: "number",
-              editable: true,
-              preview: 0.2,
-            },
-            { name: "input", kind: "array", editable: false },
-          ],
-          truncated: false,
-        });
-      const changeAction = (index: number, value: string) =>
-        fireEvent.change(
-          screen.getAllByRole("combobox", { name: "处理方式" })[index],
-          { target: { value } },
-        );
-
-      try {
-        const first = renderForm("codex", onSubmit, {
-          modeView,
-          meta: { localProxyRequestOverrides: overrides },
-        });
-        expect(observe).not.toHaveBeenCalled();
-        fireEvent.click(screen.getByRole("button", { name: "观察实际请求" }));
-        fireEvent.click(
-          await screen.findByRole("button", { name: "选择字段 x-session-id" }),
-        );
-        expect(observe).toHaveBeenCalledWith("relay");
-        expect(
-          screen.queryByRole("button", { name: "选择字段 input" }),
-        ).toBeNull();
-        changeAction(0, "remove");
-        fireEvent.click(
-          screen.getByRole("button", { name: "选择字段 temperature" }),
-        );
-        changeAction(1, "set");
-        const replacement = screen.getByRole("textbox", {
-          name: "请求体替换值（JSON）",
-        });
-        expect(replacement).toHaveValue("0.2");
-        fireEvent.change(replacement, { target: { value: "0.6" } });
-        const { values } = await save(onSubmit);
-        expect(values.meta?.localProxyRequestOverrides).toEqual({
-          ...overrides,
-          responsesRules: {
-            removeHeaders: ["x-session-id"],
-            setBodyFields: { temperature: 0.6 },
-          },
-        });
-
-        first.unmount();
-        onSubmit.mockClear();
-        renderForm("codex", onSubmit, { modeView, meta: values.meta });
-        expect(screen.getByRole("textbox", { name: "请求头名称" })).toHaveValue(
-          "x-session-id",
-        );
-        expect(
-          screen.getByRole("textbox", { name: "请求体替换值（JSON）" }),
-        ).toHaveValue("0.6");
-        for (const button of screen
-          .getAllByRole("button", { name: "移除规则" })
-          .reverse()) {
-          fireEvent.click(button);
-        }
-        const cleared = await save(onSubmit);
-        expect(cleared.values.meta?.localProxyRequestOverrides).toEqual(
-          overrides,
-        );
-      } finally {
-        observe.mockRestore();
-      }
-    },
-  );
 
   it.each(["m-2", "removed-model"])(
     "saves aliases and instructions alongside auto-review selection %s",
