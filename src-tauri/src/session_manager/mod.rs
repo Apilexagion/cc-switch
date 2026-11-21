@@ -629,14 +629,24 @@ mod tests {
             r#"{"step_index":0,"type":"USER_INPUT","content":"<USER_REQUEST>fixture</USER_REQUEST>"}"#,
         )
         .unwrap();
+        let source_path = source.to_str().unwrap();
+        // With a readable native index, unindexed transcripts may be side
+        // questions or internal runs. A private profile does not bypass this.
+        assert!(resume_session_target("agy", "transcript-id", source_path).is_err());
         assert_eq!(
-            resume_session_target("agy", "transcript-id", source.to_str().unwrap()).unwrap(),
+            fixture.insert_profile("relay one", "transcript-id", &project),
+            dir
+        );
+        assert_eq!(
+            resume_session_target("agy", "transcript-id", source_path).unwrap(),
             (
                 crate::agy_config::resume_command(Some(&dir), "transcript-id"),
-                None
+                Some(project.to_string_lossy().into_owned())
             )
         );
-        assert!(resume_index_only_session_target("agy", "transcript-id").is_err());
+        assert!(resume_index_only_session_target("agy", "transcript-id")
+            .unwrap_err()
+            .contains("source changed"));
 
         // Private profiles do not gain the display scanner's first-wins
         // exception: a source-less identity present in two profiles is ambiguous.
