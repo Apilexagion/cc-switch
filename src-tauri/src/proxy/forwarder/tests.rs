@@ -3368,8 +3368,16 @@ mod codex_stack {
         }
         // xAI's later native-Responses sanitizer must keep an explicit card reviewer
         // even when it is not a Grok SKU and is not in the handwritten catalog.
-        // The local fixture URL includes the detector's xAI marker in its path;
-        // all traffic still terminates at the in-process test upstream.
+        // Use xAI's actual hostname for the host-based detector, routing every
+        // request through an explicit HTTP proxy backed by the local fixture.
+        struct RestoreProxy(Option<String>);
+        impl Drop for RestoreProxy {
+            fn drop(&mut self) {
+                let _ = crate::proxy::http_client::apply_proxy(self.0.as_deref());
+            }
+        }
+        let _proxy_restore = RestoreProxy(crate::proxy::http_client::get_current_proxy_url());
+        crate::proxy::http_client::apply_proxy(Some(&upstream.base_url)).unwrap();
         for reviewer in ["review-only", ""] {
             let mut configured = provider(&upstream, "openai_responses");
             let mut config = configured.settings_config["config"]
@@ -3379,7 +3387,7 @@ mod codex_stack {
                 .unwrap();
             config["model"] = toml_edit::value("grok-4.6");
             config["model_providers"]["custom"]["base_url"] =
-                toml_edit::value(format!("{}/v1/api.x.ai", upstream.base_url));
+                toml_edit::value("http://api.x.ai/v1");
             configured.settings_config["config"] = json!(config.to_string());
             configured
                 .settings_config

@@ -389,6 +389,22 @@ jobs:
               text = path.read_text(encoding="utf-8", errors="replace")
               text = re.sub(r"\x1b\[[0-9;]*m", "", text)
               lines = [line for line in text.splitlines() if not re.match(r"\s*(?:PASS|SKIP)\s+\[", line)]
+              sections = []
+              seen = set()
+              for match in re.finditer(r"(?m)^\s*(?:FAIL|TIMEOUT)\s+\[[^\n]+", text):
+                  title = match.group().strip()
+                  if title in seen:
+                      continue
+                  seen.add(title)
+                  following = text[match.end():]
+                  boundary = re.search(r"(?m)^\s*(?:PASS|SKIP|FAIL|TIMEOUT|SLOW|LEAK)\s+\[|^─{6,}", following)
+                  block = following[:boundary.start()] if boundary else following
+                  sections.append((title, f"{title}\n{block.strip()}"[-3500:]))
+              if sections:
+                  for number, (_, section) in enumerate(sections, 1):
+                      escaped = section.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+                      print(f"::error title={path.stem} failure {number}::{escaped}")
+                  continue
               tail = "\n".join(lines[-100:])[-3500:]
               escaped = tail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
               print(f"::error title={path.stem}::{escaped}")

@@ -9887,6 +9887,8 @@ mod tests {
         let new = temp.path().join(".agents/skills/collision");
         write_skill(&old, "source A");
         write_skill(&new, "source B");
+        let original_source = fs::read(old.join("SKILL.md")).unwrap();
+        let original_destination = fs::read(new.join("SKILL.md")).unwrap();
         let result = SkillService::migrate_storage(&db, SkillStorageLocation::Unified).unwrap();
         assert_eq!(result.migrated_count, 0);
         assert!(!result.errors.is_empty());
@@ -9894,8 +9896,11 @@ mod tests {
             crate::settings::get_skill_storage_location(),
             SkillStorageLocation::CcSwitch
         );
-        assert_eq!(fs::read(old.join("SKILL.md")).unwrap(), b"source A");
-        assert_eq!(fs::read(new.join("SKILL.md")).unwrap(), b"source B");
+        assert_eq!(fs::read(old.join("SKILL.md")).unwrap(), original_source);
+        assert_eq!(
+            fs::read(new.join("SKILL.md")).unwrap(),
+            original_destination
+        );
     }
 
     #[test]
@@ -9909,6 +9914,7 @@ mod tests {
         db.save_skill(&skill).unwrap();
         let old = SkillService::get_ssot_dir().unwrap().join("managed");
         write_skill(&old, "source");
+        let original_source = fs::read(old.join("SKILL.md")).unwrap();
         let target = temp.path().join(".agents/skills/managed");
         let result =
             SkillService::migrate_storage_with_commit(&db, SkillStorageLocation::Unified, |_| {
@@ -9923,7 +9929,7 @@ mod tests {
             crate::settings::get_skill_storage_location(),
             SkillStorageLocation::CcSwitch
         );
-        assert_eq!(fs::read(old.join("SKILL.md")).unwrap(), b"source");
+        assert_eq!(fs::read(old.join("SKILL.md")).unwrap(), original_source);
         assert!(!target.exists());
     }
 
@@ -9940,6 +9946,7 @@ mod tests {
         write_skill(&old, "source");
         fs::write(old.join(".hidden"), "retained").unwrap();
         let target = temp.path().join(".agents/skills/same");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
         SkillService::copy_migration_tree(&old, &target).unwrap();
         let result = SkillService::migrate_storage(&db, SkillStorageLocation::Unified).unwrap();
         assert!(result.errors.is_empty(), "{:?}", result.errors);

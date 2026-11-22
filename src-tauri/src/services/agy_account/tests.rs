@@ -407,6 +407,7 @@ mod switching {
             let cred = &mut store.accounts.get_mut("alice").unwrap().credential;
             cred["token"]["access_token"] = json!("refreshed-by-cc-switch");
             cred["token"]["expiry"] = json!(in_an_hour());
+            manager.persist(&store).unwrap();
         }
         assert_eq!(
             manager
