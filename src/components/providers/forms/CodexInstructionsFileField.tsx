@@ -32,7 +32,7 @@ import {
   type CodexInstructionsFileState,
   type CodexInstructionsFileStatus,
 } from "@/lib/api/codexInstructions";
-import { normalizeCodexModelInstructionsFiles } from "@/utils/providerConfigUtils";
+import { normalizeCodexModelInstructionsFiles } from "@/utils/codexConfigUtils";
 
 interface CodexInstructionsFileFieldProps {
   enabled: boolean;

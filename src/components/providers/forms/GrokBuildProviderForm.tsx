@@ -47,7 +47,7 @@ import {
   extractCodexBaseUrl,
   extractCodexModelName,
   extractCodexWireApi,
-} from "@/utils/providerConfigUtils";
+} from "@/utils/codexConfigUtils";
 import {
   buildGrokBuildConfig,
   GROK_BUILD_DEFAULT_API_BACKEND,

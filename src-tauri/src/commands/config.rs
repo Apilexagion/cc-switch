@@ -1,5 +1,3 @@
-#![allow(non_snake_case)]
-
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::ErrorKind;

@@ -19,7 +19,7 @@ import {
   setCodexTopLevelInt,
   setCodexTopLevelString,
   updateCodexExperimentalBearerToken,
-} from "@/utils/providerConfigUtils";
+} from "@/utils/codexConfigUtils";
 
 describe("Codex TOML utils", () => {
   it("removes base_url line when set to empty", () => {

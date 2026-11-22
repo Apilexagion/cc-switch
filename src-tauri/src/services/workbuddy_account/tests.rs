@@ -245,6 +245,7 @@ fn imports_the_current_account_with_its_whole_bundle() {
     {
         let store_path = fixture.data_dir.join(STORE_FILENAME);
         use std::os::unix::fs::PermissionsExt;
+        let store_path = fixture.data_dir.join(STORE_FILENAME);
         let mode = std::fs::metadata(&store_path).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o600);
     }
