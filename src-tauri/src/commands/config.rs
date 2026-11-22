@@ -442,11 +442,11 @@ fn inspect_codex_instructions_file_at(
 
 #[tauri::command]
 pub async fn inspect_codex_instructions_file(
-    configuredPath: String,
+    configured_path: String,
 ) -> Result<CodexInstructionsFileStatus, String> {
     let config_dir = codex_config::get_codex_config_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        inspect_codex_instructions_file_at(&configuredPath, &config_dir)
+        inspect_codex_instructions_file_at(&configured_path, &config_dir)
     })
     .await
     .map_err(|error| format!("Failed to inspect Codex model instructions file: {error}"))
@@ -454,11 +454,11 @@ pub async fn inspect_codex_instructions_file(
 
 #[tauri::command]
 pub async fn read_codex_instructions_file(
-    configuredPath: String,
+    configured_path: String,
 ) -> Result<Option<String>, String> {
     let config_dir = codex_config::get_codex_config_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        read_codex_instructions_file_at(&configuredPath, &config_dir)
+        read_codex_instructions_file_at(&configured_path, &config_dir)
     })
     .await
     .map_err(|error| format!("Failed to read Codex model instructions file: {error}"))?
@@ -466,22 +466,22 @@ pub async fn read_codex_instructions_file(
 
 #[tauri::command]
 pub async fn write_codex_instructions_file(
-    configuredPath: String,
+    configured_path: String,
     content: String,
 ) -> Result<CodexInstructionsFileStatus, String> {
     let config_dir = codex_config::get_codex_config_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        write_codex_instructions_file_at(&configuredPath, &content, &config_dir)
+        write_codex_instructions_file_at(&configured_path, &content, &config_dir)
     })
     .await
     .map_err(|error| format!("Failed to write Codex model instructions file: {error}"))?
 }
 
 #[tauri::command]
-pub async fn delete_codex_instructions_file(configuredPath: String) -> Result<bool, String> {
+pub async fn delete_codex_instructions_file(configured_path: String) -> Result<bool, String> {
     let config_dir = codex_config::get_codex_config_dir();
     tauri::async_runtime::spawn_blocking(move || {
-        delete_codex_instructions_file_at(&configuredPath, &config_dir)
+        delete_codex_instructions_file_at(&configured_path, &config_dir)
     })
     .await
     .map_err(|error| format!("Failed to delete Codex model instructions file: {error}"))?

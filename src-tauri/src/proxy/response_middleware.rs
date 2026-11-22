@@ -588,7 +588,8 @@ mod tests {
         let mut body = String::new();
         let mut stream = wrapped.bytes_stream();
         while let Some(chunk) = stream.next().await {
-            body.push_str(&String::from_utf8(chunk.unwrap().to_vec()).unwrap());
+            let chunk = chunk.unwrap();
+            body.push_str(std::str::from_utf8(&chunk).unwrap());
         }
         assert!(body.contains("\"seen\":true"), "body was: {body}");
         assert!(body.contains("\"i\":1"));

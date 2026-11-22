@@ -994,11 +994,10 @@ mod gateway_key_tests {
         request_id: &str,
         gateway_key_id: Option<&str>,
         created_at: i64,
-        input: i64,
-        output: i64,
-        cache_creation: i64,
+        usage: (i64, i64, i64),
         total_cost_usd: &str,
     ) {
+        let (input, output, cache_creation) = usage;
         let conn = db.conn.lock().expect("conn lock");
         conn.execute(
             "INSERT INTO proxy_request_logs (
@@ -1023,11 +1022,11 @@ mod gateway_key_tests {
     fn sum_gateway_key_usage_attributes_and_windows() {
         let db = db();
         // key k1：窗口内两条（tokens 10+20+... / cost 0.5+0.25）、窗口外一条、以及别的 key 一条。
-        insert_log(&db, "r1", Some("k1"), 1_000, 10, 5, 2, "0.50"); // 17 tokens
-        insert_log(&db, "r2", Some("k1"), 1_500, 20, 10, 0, "0.25"); // 30 tokens
-        insert_log(&db, "r3", Some("k1"), 500, 100, 100, 0, "9.00"); // 窗口外
-        insert_log(&db, "r4", Some("k2"), 1_200, 7, 7, 0, "1.00"); // 别的 key
-        insert_log(&db, "r5", None, 1_200, 99, 99, 0, "9.00"); // 无归因
+        insert_log(&db, "r1", Some("k1"), 1_000, (10, 5, 2), "0.50"); // 17 tokens
+        insert_log(&db, "r2", Some("k1"), 1_500, (20, 10, 0), "0.25"); // 30 tokens
+        insert_log(&db, "r3", Some("k1"), 500, (100, 100, 0), "9.00"); // 窗口外
+        insert_log(&db, "r4", Some("k2"), 1_200, (7, 7, 0), "1.00"); // 别的 key
+        insert_log(&db, "r5", None, 1_200, (99, 99, 0), "9.00"); // 无归因
 
         // Existing attributed logs are migrated before quota checks start.
         {

@@ -844,7 +844,7 @@ fn apply_config_changes_with(
 
 // Kept small and private for the focused regression tests. Production installs use the
 // multi-file transaction above so every target is checked before any file is changed.
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "windows")))]
 fn write_wrapper_into(path: &Path, shell_type: &str, wrapper: &str) -> Result<bool, String> {
     let change = plan_wrapper_change(path, Some(wrapper), true)?;
     let Some(change) = change else {
@@ -855,7 +855,7 @@ fn write_wrapper_into(path: &Path, shell_type: &str, wrapper: &str) -> Result<bo
     Ok(true)
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "windows")))]
 fn remove_wrapper_from(path: &Path) -> Result<bool, String> {
     let change = plan_wrapper_change(path, None, false)?;
     let Some(change) = change else {

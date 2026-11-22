@@ -28,7 +28,7 @@ impl ClaudeAccountManager {
                 added_at: 1,
             },
         );
-        self.persist(&store).unwrap();
+        self.persist(store).unwrap();
         config_dir
     }
 }
@@ -132,7 +132,7 @@ async fn corrupt_local_id_never_resolves() {
             },
         );
         // 账号表以磁盘为准（切换时可能收录账号）
-        manager.persist(&store).unwrap();
+        manager.persist(store).unwrap();
     }
     assert_eq!(config_dir_on_disk(tmp.path(), "acc:"), None);
     assert!(manager.list().await[0].requires_reauth);
@@ -401,7 +401,7 @@ fn unreadable_account_index_cannot_be_atomically_overwritten() {
     let path = tmp.path().join(STORE_FILENAME);
     let original = serde_json::to_vec(&StoreFile::default()).unwrap();
     std::fs::write(&path, &original).unwrap();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o0)).unwrap();
     let result = persist_store(tmp.path(), &StoreFile::default());
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
     assert!(result.is_err());

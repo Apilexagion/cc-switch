@@ -365,15 +365,16 @@ mod tests {
             Router,
         };
         use std::sync::{Arc, Mutex};
+        type RemoteStore = Arc<Mutex<(Vec<u8>, usize)>>;
         let store = Arc::new(Mutex::new((b"published-a".to_vec(), 1usize)));
-        async fn read(State(store): State<Arc<Mutex<(Vec<u8>, usize)>>>) -> (HeaderMap, Vec<u8>) {
+        async fn read(State(store): State<RemoteStore>) -> (HeaderMap, Vec<u8>) {
             let (body, revision) = &*store.lock().unwrap();
             let mut headers = HeaderMap::new();
             headers.insert("etag", format!("\"{revision}\"").parse().unwrap());
             (headers, body.clone())
         }
         async fn write(
-            State(store): State<Arc<Mutex<(Vec<u8>, usize)>>>,
+            State(store): State<RemoteStore>,
             headers: HeaderMap,
             body: Bytes,
         ) -> StatusCode {

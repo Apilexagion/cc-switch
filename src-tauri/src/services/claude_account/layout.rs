@@ -121,7 +121,7 @@ pub fn is_account_config_dir(data_dir: &Path, value: &str) -> bool {
 pub fn keychain_service(config_dir: &Path) -> String {
     let text = config_dir.to_string_lossy();
     #[cfg(target_os = "macos")]
-    let text = objc2_foundation_03::NSString::from_str(&text)
+    let text = objc2_foundation::NSString::from_str(&text)
         .precomposedStringWithCanonicalMapping()
         .to_string();
     let digest = Sha256::digest(text.as_bytes());

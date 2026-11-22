@@ -99,7 +99,7 @@ async fn unreadable_account_store_cannot_be_replaced_by_current_login() {
     let path = dir.path().join(STORE_FILENAME);
     let original = std::fs::read(&path).unwrap();
     let permissions = std::fs::metadata(&path).unwrap().permissions();
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o0)).unwrap();
     set_live(&login, &credential("current", "placeholder-access"));
     let result = manager.status().await;
     std::fs::set_permissions(&path, permissions).unwrap();

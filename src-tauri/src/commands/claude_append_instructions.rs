@@ -24,10 +24,10 @@ pub async fn set_claude_append_instructions_config(
 
 #[tauri::command]
 pub async fn inspect_claude_append_instructions_file(
-    configuredPath: String,
+    configured_path: String,
 ) -> Result<ClaudeAppendInstructionsFileStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::inspect_file(&configuredPath)
+        claude_append_instructions::inspect_file(&configured_path)
     })
     .await
     .map_err(|error| format!("Failed to inspect Claude append instructions file: {error}"))
@@ -35,10 +35,10 @@ pub async fn inspect_claude_append_instructions_file(
 
 #[tauri::command]
 pub async fn read_claude_append_instructions_file(
-    configuredPath: String,
+    configured_path: String,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::read_file(&configuredPath)
+        claude_append_instructions::read_file(&configured_path)
     })
     .await
     .map_err(|error| format!("Failed to read Claude append instructions file: {error}"))?
@@ -47,13 +47,13 @@ pub async fn read_claude_append_instructions_file(
 
 #[tauri::command]
 pub async fn write_claude_append_instructions_file(
-    configuredPath: String,
+    configured_path: String,
     content: String,
     state: State<'_, AppState>,
 ) -> Result<ClaudeAppendInstructionsFileStatus, String> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::write_file(db.as_ref(), &configuredPath, &content)
+        claude_append_instructions::write_file(db.as_ref(), &configured_path, &content)
     })
     .await
     .map_err(|error| format!("Failed to write Claude append instructions file: {error}"))?
@@ -62,12 +62,12 @@ pub async fn write_claude_append_instructions_file(
 
 #[tauri::command]
 pub async fn delete_claude_append_instructions_file(
-    configuredPath: String,
+    configured_path: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::delete_file_only(db.as_ref(), &configuredPath)
+        claude_append_instructions::delete_file_only(db.as_ref(), &configured_path)
     })
     .await
     .map_err(|error| format!("Failed to delete Claude append instructions file: {error}"))?
@@ -93,10 +93,10 @@ pub async fn set_claude_system_instructions_config(
 
 #[tauri::command]
 pub async fn inspect_claude_system_instructions_file(
-    configuredPath: String,
+    configured_path: String,
 ) -> Result<ClaudeAppendInstructionsFileStatus, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::inspect_file(&configuredPath)
+        claude_append_instructions::inspect_file(&configured_path)
     })
     .await
     .map_err(|error| format!("Failed to inspect Claude system instructions file: {error}"))
@@ -104,10 +104,10 @@ pub async fn inspect_claude_system_instructions_file(
 
 #[tauri::command]
 pub async fn read_claude_system_instructions_file(
-    configuredPath: String,
+    configured_path: String,
 ) -> Result<Option<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::read_file(&configuredPath)
+        claude_append_instructions::read_file(&configured_path)
     })
     .await
     .map_err(|error| format!("Failed to read Claude system instructions file: {error}"))?
@@ -116,13 +116,13 @@ pub async fn read_claude_system_instructions_file(
 
 #[tauri::command]
 pub async fn write_claude_system_instructions_file(
-    configuredPath: String,
+    configured_path: String,
     content: String,
     state: State<'_, AppState>,
 ) -> Result<ClaudeAppendInstructionsFileStatus, String> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::write_system_file(db.as_ref(), &configuredPath, &content)
+        claude_append_instructions::write_system_file(db.as_ref(), &configured_path, &content)
     })
     .await
     .map_err(|error| format!("Failed to write Claude system instructions file: {error}"))?
@@ -131,12 +131,12 @@ pub async fn write_claude_system_instructions_file(
 
 #[tauri::command]
 pub async fn delete_claude_system_instructions_file(
-    configuredPath: String,
+    configured_path: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
     let db = state.db.clone();
     tauri::async_runtime::spawn_blocking(move || {
-        claude_append_instructions::delete_system_file_only(db.as_ref(), &configuredPath)
+        claude_append_instructions::delete_system_file_only(db.as_ref(), &configured_path)
     })
     .await
     .map_err(|error| format!("Failed to delete Claude system instructions file: {error}"))?

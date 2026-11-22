@@ -6,7 +6,6 @@ import {
   extractCodexBaseUrl,
   extractCodexExperimentalBearerToken,
   extractCodexModelName,
-  getApiKeyFromConfig,
   extractCodexMultiAgentV2Total,
   extractCodexTopLevelInt,
   extractCodexTopLevelString,
@@ -20,6 +19,7 @@ import {
   setCodexTopLevelString,
   updateCodexExperimentalBearerToken,
 } from "@/utils/codexConfigUtils";
+import { getApiKeyFromConfig } from "@/utils/providerConfigUtils";
 
 describe("Codex TOML utils", () => {
   it("removes base_url line when set to empty", () => {
