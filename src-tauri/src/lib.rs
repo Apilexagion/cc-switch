@@ -38,6 +38,8 @@ mod lightweight;
 #[cfg(target_os = "linux")]
 mod linux_fix;
 pub mod live;
+#[cfg(any(target_os = "macos", test))]
+mod macos_keychain;
 #[cfg(target_os = "macos")]
 mod macos_tray_window;
 mod mcode_config;

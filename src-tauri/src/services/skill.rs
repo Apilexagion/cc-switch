@@ -2317,22 +2317,30 @@ impl SkillService {
 
     /// 迁移 Skill 存储位置（在两个 SSOT 目录间移动文件）
     ///
-    /// 安全策略：先移文件，后改设置。中途崩溃时设置仍指向旧目录。
+    /// Stage complete copies before committing the storage location. Originals
+    /// remain usable until every affected application has been relinked.
     pub fn migrate_storage(
         db: &Arc<Database>,
         target: SkillStorageLocation,
     ) -> Result<MigrationResult> {
+        Self::migrate_storage_with_commit(db, target, crate::settings::set_skill_storage_location)
+    }
+
+    fn migrate_storage_with_commit(
+        db: &Arc<Database>,
+        target: SkillStorageLocation,
+        commit: impl FnOnce(SkillStorageLocation) -> std::result::Result<(), crate::error::AppError>,
+    ) -> Result<MigrationResult> {
         let _state_guard = skill_state_write_guard();
-        let current = crate::settings::get_skill_storage_location();
-        if current == target {
-            return Ok(MigrationResult {
-                migrated_count: 0,
-                skipped_count: 0,
-                errors: vec![],
-            });
+        let mut result = MigrationResult {
+            migrated_count: 0,
+            skipped_count: 0,
+            errors: Vec::new(),
+        };
+        if crate::settings::get_skill_storage_location() == target {
+            return Ok(result);
         }
 
-        // 1. 解析旧目录和新目录（不改设置）
         let old_dir = Self::get_ssot_dir()?;
         let new_dir = match target {
             SkillStorageLocation::CcSwitch => get_app_config_dir().join("skills"),
@@ -2342,8 +2350,6 @@ impl SkillService {
         };
         fs::create_dir_all(&new_dir)?;
         Self::validate_skill_storage_destination(&new_dir)?;
-
-        // 2. 逐个移动 skill 目录
         let skills = db.get_all_installed_skills()?;
         let native_dirs = [AppType::Pi, AppType::Omp]
             .into_iter()
@@ -2353,55 +2359,82 @@ impl SkillService {
                 Ok((app, dir, uses_old_ssot))
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut managed_deployments: Vec<(String, PathBuf, PiSkillDeployment)> = Vec::new();
-        let mut native_sources = Vec::new();
-        let mut result = MigrationResult {
-            migrated_count: 0,
-            skipped_count: 0,
-            errors: vec![],
-        };
-
+        let mut directories = std::collections::BTreeSet::new();
+        let mut sources = Vec::new();
+        let mut reusable = HashSet::new();
+        // Complete collision checks before publishing any destination directory.
         for skill in skills.values() {
-            // 下面是 rename 与 remove_dir_all，脏 directory 可把任意目录搬走或删掉。
-            // 软失败：本函数已有 errors 收集通道，记一条继续处理其余 skill，
-            // 不要整体中断——用户只是在切换存储位置。
             let directory = match Self::require_valid_directory(&skill.directory) {
                 Ok(directory) => directory,
-                Err(err) => {
+                Err(error) => {
                     result
                         .errors
-                        .push(format!("{}: {err}", skill.directory.escape_debug()));
+                        .push(format!("{}: {error}", skill.directory.escape_debug()));
                     continue;
                 }
             };
-            let src = old_dir.join(&directory);
-            let dst = new_dir.join(&directory);
-
-            if !src.exists() {
-                result.skipped_count += 1;
+            if !directories.insert(directory.clone()) {
                 continue;
             }
-            if dst.exists() {
-                result.skipped_count += 1;
-                continue;
-            }
-
-            // Native Pi/Omp state comes from directory presence, not stored flags.
-            // Preserve roots that alias the old SSOT; refresh only verified managed
-            // copies, leaving same-name externally modified skills untouched.
-            let mut pending_deployments = Vec::new();
-            let mut pending_native_sources = Vec::new();
-            for (app, dir, uses_old_ssot) in &native_dirs {
-                if *uses_old_ssot {
-                    pending_native_sources.push((directory.clone(), app.clone()));
+            let source = old_dir.join(&directory);
+            let destination = new_dir.join(&directory);
+            if !source.exists() {
+                if destination.exists() || Self::is_symlink(&destination) {
+                    result
+                        .errors
+                        .push(format!("{directory}: 原 Skill 缺失，无法核对目标同名内容"));
                 } else {
-                    let destination = dir.join(&directory);
+                    result.skipped_count += 1;
+                }
+                continue;
+            }
+            let hash = Self::compute_pi_deployment_hash(&source)?;
+            if destination.exists() || Self::is_symlink(&destination) {
+                if Self::is_symlink(&destination)
+                    || !destination.is_dir()
+                    || Self::compute_pi_deployment_hash(&destination)? != hash
+                {
+                    result
+                        .errors
+                        .push(format!("{directory}: 目标位置已有同名但内容不同的 Skill"));
+                    continue;
+                }
+                reusable.insert(directory.clone());
+            }
+            sources.push((directory, source, destination, hash));
+        }
+        if !result.errors.is_empty() {
+            return Ok(result);
+        }
+
+        let staging = tempfile::Builder::new()
+            .prefix(".skill-migration-")
+            .tempdir_in(&new_dir)?;
+        let mut deployments = Vec::new();
+        let mut native_copies = HashSet::new();
+        for (directory, source, _, expected) in &sources {
+            if !reusable.contains(directory) {
+                let staged = staging.path().join(directory);
+                Self::copy_migration_tree(source, &staged)?;
+                if Self::compute_pi_deployment_hash(&staged)? != *expected {
+                    return Err(anyhow!(
+                        "Skill changed while staging migration: {directory}"
+                    ));
+                }
+            }
+            for (_, dir, uses_old_ssot) in &native_dirs {
+                if *uses_old_ssot {
+                    // The old SSOT is also an application's native directory.
+                    // Preserve that native copy when storage moves elsewhere.
+                    native_copies.insert(source.clone());
+                } else {
+                    let destination = dir.join(directory);
                     if let Some(deployment) =
-                        Self::inspect_pi_skill_destination(&src, &destination, &directory)
+                        Self::inspect_pi_skill_destination(source, &destination, directory)
                             .ok()
                             .flatten()
                     {
-                        pending_deployments.push((directory.clone(), destination, deployment));
+                        deployments.push((directory.clone(), destination, deployment));
                     }
                 }
             }
@@ -2413,82 +2446,158 @@ impl SkillService {
                 AppType::Copilot,
                 AppType::WorkBuddy,
             ] {
-                if skill.apps.is_enabled_for(&app) {
-                    let destination = Self::get_app_skills_dir(&app)?.join(&directory);
+                if skills
+                    .values()
+                    .any(|skill| skill.directory == *directory && skill.apps.is_enabled_for(&app))
+                {
+                    let destination = Self::get_app_skills_dir(&app)?.join(directory);
                     if let Some(deployment) =
-                        Self::inspect_pi_skill_destination(&src, &destination, &directory)
+                        Self::inspect_pi_skill_destination(source, &destination, directory)
                             .ok()
                             .flatten()
                     {
-                        pending_deployments.push((directory.clone(), destination, deployment));
+                        deployments.push((directory.clone(), destination, deployment));
                     }
                 }
-            }
-            // 优先 rename（同文件系统原子操作），失败则 copy+delete
-            match fs::rename(&src, &dst) {
-                Ok(()) => {
-                    result.migrated_count += 1;
-                    managed_deployments.extend(pending_deployments);
-                    native_sources.extend(pending_native_sources);
-                }
-                Err(_) => match Self::copy_dir_recursive(&src, &dst) {
-                    Ok(()) => {
-                        let _ = fs::remove_dir_all(&src);
-                        result.migrated_count += 1;
-                        managed_deployments.extend(pending_deployments);
-                        native_sources.extend(pending_native_sources);
-                    }
-                    Err(e) => {
-                        result.errors.push(format!("{}: {e}", skill.directory));
-                    }
-                },
             }
         }
 
-        // 3. 文件移动完成后才持久化设置
-        crate::settings::set_skill_storage_location(target)?;
+        let mut installed = Vec::new();
+        let publish = (|| -> Result<()> {
+            for (directory, source, destination, expected) in &sources {
+                if Self::compute_pi_deployment_hash(source)? != *expected {
+                    return Err(anyhow!(
+                        "Skill changed during storage migration: {directory}"
+                    ));
+                }
+                if reusable.contains(directory) {
+                    if Self::is_symlink(destination)
+                        || Self::compute_pi_deployment_hash(destination)? != *expected
+                    {
+                        return Err(anyhow!(
+                            "Skill destination changed during storage migration: {directory}"
+                        ));
+                    }
+                    result.skipped_count += 1;
+                } else {
+                    if destination.exists() || Self::is_symlink(destination) {
+                        return Err(anyhow!(
+                            "Skill destination changed during storage migration: {directory}"
+                        ));
+                    }
+                    fs::rename(staging.path().join(directory), destination)?;
+                    installed.push((destination.clone(), expected.clone()));
+                    result.migrated_count += 1;
+                }
+            }
+            commit(target)?;
+            Ok(())
+        })();
+        if let Err(error) = publish {
+            Self::rollback_migration_targets(&installed);
+            return Err(error);
+        }
 
-        let mut refreshed_entries = Vec::new();
-        for (directory, destination, deployment) in managed_deployments {
-            if refreshed_entries
+        let mut refreshed = Vec::new();
+        for (directory, destination, deployment) in deployments {
+            if refreshed
                 .iter()
                 .any(|entry: &PathBuf| Self::paths_same_entry(entry, &destination))
             {
                 continue;
             }
-            refreshed_entries.push(destination.clone());
-            let source = new_dir.join(&directory);
-            if let Err(err) =
-                Self::refresh_pi_skill_destination(&source, &destination, &directory, &deployment)
-            {
-                result.errors.push(format!("{directory}: {err}"));
+            refreshed.push(destination.clone());
+            if let Err(error) = Self::refresh_pi_skill_destination(
+                &new_dir.join(&directory),
+                &destination,
+                &directory,
+                &deployment,
+            ) {
+                result.errors.push(format!("{directory}: {error}"));
             }
         }
-
-        // 4. 刷新所有应用目录的 symlink（指向新 SSOT）
-        // 旧目录已经搬走：哪个应用没重链成功，它的 Skill 就指向不存在的路径，必须报出来。
         for app in AppType::all() {
             match Self::sync_to_app_unlocked(db, &app) {
-                Ok(failed) => result.errors.extend(failed.into_iter().map(|failure| {
+                Ok(failures) => result.errors.extend(failures.into_iter().map(|failure| {
                     format!("{}/{}: {}", app.as_str(), failure.directory, failure.error)
                 })),
-                Err(err) => result.errors.push(format!("{}: {err}", app.as_str())),
+                Err(error) => result.errors.push(format!("{}: {error}", app.as_str())),
             }
         }
-        for (directory, app) in native_sources {
-            if let Err(err) = Self::sync_to_app_dir(&directory, &app) {
-                result.errors.push(format!("{directory}: {err}"));
+        // A failed relink leaves its old target available for recovery. Native
+        // copies are owned by their application and survive a storage move.
+        if result.errors.is_empty() {
+            for (_, source, _, expected) in sources {
+                if native_copies.contains(&source) || Self::is_symlink(&source) || !source.exists()
+                {
+                    continue;
+                }
+                match Self::compute_pi_deployment_hash(&source) {
+                    Ok(hash) if hash == expected => {
+                        if let Err(error) = Self::remove_path(&source) {
+                            result.errors.push(format!("{}: {error}", source.display()));
+                        }
+                    }
+                    Ok(_) => result.errors.push(format!(
+                        "{}: 原 Skill 在迁移期间发生变化，已保留",
+                        source.display()
+                    )),
+                    Err(error) => result.errors.push(format!("{}: {error}", source.display())),
+                }
             }
         }
-
         log::info!(
             "Skill 存储迁移完成: {} 迁移, {} 跳过, {} 错误",
             result.migrated_count,
             result.skipped_count,
             result.errors.len()
         );
-
         Ok(result)
+    }
+
+    fn rollback_migration_targets(installed: &[(PathBuf, String)]) {
+        for (path, expected) in installed.iter().rev() {
+            if matches!(Self::compute_pi_deployment_hash(path), Ok(hash) if &hash == expected) {
+                if let Err(error) = Self::remove_path(path) {
+                    log::warn!(
+                        "Skill migration staging cleanup failed at {}: {error}",
+                        path.display()
+                    );
+                }
+            }
+        }
+    }
+
+    /// Preserve link identity while staging. Regular Skills obtained from a
+    /// repository have already had internal links resolved by the installer.
+    fn copy_migration_tree(source: &Path, destination: &Path) -> Result<()> {
+        let metadata = fs::symlink_metadata(source)?;
+        if metadata.file_type().is_symlink() {
+            let target = fs::read_link(source)?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, destination)?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x10 != 0 {
+                    std::os::windows::fs::symlink_dir(&target, destination)?;
+                } else {
+                    std::os::windows::fs::symlink_file(&target, destination)?;
+                }
+            }
+        } else if metadata.is_dir() {
+            fs::create_dir(destination)?;
+            for entry in fs::read_dir(source)? {
+                let entry = entry?;
+                Self::copy_migration_tree(&entry.path(), &destination.join(entry.file_name()))?;
+            }
+            fs::set_permissions(destination, metadata.permissions())?;
+        } else if metadata.is_file() {
+            fs::copy(source, destination)?;
+        } else {
+            return Err(anyhow!("Unsupported Skill entry: {}", source.display()));
+        }
+        Ok(())
     }
 
     pub fn list_backups() -> Result<Vec<SkillBackupEntry>> {
@@ -9736,6 +9845,80 @@ mod tests {
             source.join("SKILL.md").exists(),
             "rejecting the operation must leave the SSOT untouched"
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn migration_rejects_same_name_different_content_before_changing_storage() {
+        let temp = tempdir().unwrap();
+        let home = TestHomeGuard::set(temp.path());
+        let _location = StorageLocationGuard::set(&home, SkillStorageLocation::CcSwitch);
+        let db = Arc::new(Database::memory().unwrap());
+        let skill = poisoned_skill("repo:collision", "collision");
+        db.save_skill(&skill).unwrap();
+        let old = SkillService::get_ssot_dir().unwrap().join("collision");
+        let new = temp.path().join(".agents/skills/collision");
+        write_skill(&old, "source A");
+        write_skill(&new, "source B");
+        let result = SkillService::migrate_storage(&db, SkillStorageLocation::Unified).unwrap();
+        assert_eq!(result.migrated_count, 0);
+        assert!(!result.errors.is_empty());
+        assert_eq!(
+            crate::settings::get_skill_storage_location(),
+            SkillStorageLocation::CcSwitch
+        );
+        assert_eq!(fs::read(old.join("SKILL.md")).unwrap(), b"source A");
+        assert_eq!(fs::read(new.join("SKILL.md")).unwrap(), b"source B");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn migration_setting_failure_keeps_source_and_removes_only_staged_targets() {
+        let temp = tempdir().unwrap();
+        let home = TestHomeGuard::set(temp.path());
+        let _location = StorageLocationGuard::set(&home, SkillStorageLocation::CcSwitch);
+        let db = Arc::new(Database::memory().unwrap());
+        let skill = poisoned_skill("repo:managed", "managed");
+        db.save_skill(&skill).unwrap();
+        let old = SkillService::get_ssot_dir().unwrap().join("managed");
+        write_skill(&old, "source");
+        let target = temp.path().join(".agents/skills/managed");
+        let result =
+            SkillService::migrate_storage_with_commit(&db, SkillStorageLocation::Unified, |_| {
+                assert!(old.join("SKILL.md").exists());
+                assert!(target.join("SKILL.md").exists());
+                Err(crate::error::AppError::Config(
+                    "injected settings failure".into(),
+                ))
+            });
+        assert!(result.is_err());
+        assert_eq!(
+            crate::settings::get_skill_storage_location(),
+            SkillStorageLocation::CcSwitch
+        );
+        assert_eq!(fs::read(old.join("SKILL.md")).unwrap(), b"source");
+        assert!(!target.exists());
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn migration_reuses_identical_target_and_preserves_hidden_content() {
+        let temp = tempdir().unwrap();
+        let home = TestHomeGuard::set(temp.path());
+        let _location = StorageLocationGuard::set(&home, SkillStorageLocation::CcSwitch);
+        let db = Arc::new(Database::memory().unwrap());
+        let skill = poisoned_skill("repo:same", "same");
+        db.save_skill(&skill).unwrap();
+        let old = SkillService::get_ssot_dir().unwrap().join("same");
+        write_skill(&old, "source");
+        fs::write(old.join(".hidden"), "retained").unwrap();
+        let target = temp.path().join(".agents/skills/same");
+        SkillService::copy_migration_tree(&old, &target).unwrap();
+        let result = SkillService::migrate_storage(&db, SkillStorageLocation::Unified).unwrap();
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        assert_eq!(result.skipped_count, 1);
+        assert_eq!(fs::read(target.join(".hidden")).unwrap(), b"retained");
+        assert!(!old.exists());
     }
 
     #[test]

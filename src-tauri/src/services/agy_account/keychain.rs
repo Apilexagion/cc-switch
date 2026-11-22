@@ -181,7 +181,7 @@ mod macos {
     }
 
     /// `-U` 原地更新，保留条目原有的访问控制（不删再建、不加 `-A`）。值经 `security -i` 的标准
-    /// 输入传，不出现在进程参数里；只有超出交互缓冲时才退回命令行参数。
+    /// 输入传，不出现在进程参数里；超出缓冲时经 Security.framework 原地写入。
     pub fn write(service: &str, account: &str, value: &str) -> Result<(), AppError> {
         // go-keyring 格式只含 base64 字符，引号里放得下；别的值不写，免得拼坏命令。
         if value.is_empty()
@@ -215,20 +215,11 @@ mod macos {
             }
             child.wait_with_output()
         } else {
-            log::warn!("[AgyAccount] 登录数据超出 security -i 缓冲，改经命令行参数写入");
-            Command::new(SECURITY)
-                .args([
-                    "add-generic-password",
-                    "-U",
-                    "-s",
-                    service,
-                    "-a",
-                    account,
-                    "-w",
-                    value,
-                ])
-                .stdin(Stdio::null())
-                .output()
+            return crate::macos_keychain::write_generic_password(
+                service,
+                account,
+                value.as_bytes(),
+            );
         }
         .map_err(|source| AppError::IoContext {
             context: "写入 Antigravity 登录失败".into(),

@@ -85,29 +85,37 @@ const QUOTA_EXHAUSTED_EPS: f64 = 0.001;
 /// 窗口趋近 0 导致速率炸裂、把一个其实快用完的账号错排到最前。
 const PACE_MIN_WINDOW_MS: f64 = 10.0 * 60.0 * 1000.0;
 
-/// 把一个候选的额度视图映射成「越小越优先」的 f64 排序键。
-///
-/// `view = None`（额度未知）恒返回 `+∞`，稳定排序下会落在所有「已知额度」候选之后，
-/// 且彼此保持原有队列相对顺序 —— 这正是我们要的「未知者维持 order 语义殿后」。
-fn quota_sort_key(strategy: RoutingStrategy, view: Option<&QuotaView>) -> f64 {
+/// 先按额度是否耗尽分组，再比较组内优先级。未知重置时间只能影响组内顺序，
+/// 不能靠一个浮点哨兵把仍有额度的账号排到耗尽账号之后。
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct QuotaSortKey {
+    group: u8,
+    priority: f64,
+}
+
+impl QuotaSortKey {
+    fn total_cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.group
+            .cmp(&other.group)
+            .then_with(|| self.priority.total_cmp(&other.priority))
+    }
+}
+
+fn quota_sort_key(strategy: RoutingStrategy, view: Option<&QuotaView>) -> QuotaSortKey {
     let Some(v) = view else {
-        return f64::INFINITY;
+        return QuotaSortKey {
+            group: 2,
+            priority: 0.0,
+        };
     };
     match strategy {
-        RoutingStrategy::Smart => {
-            // 已耗尽的加一个极大基数，确保恒排在所有未耗尽之后；
-            // 未耗尽者按「距重置毫秒数」升序 —— 最快重置优先（重置时浪费最少）。
-            let base = if v.remaining_fraction <= QUOTA_EXHAUSTED_EPS {
-                1.0e18
-            } else {
-                0.0
-            };
-            let reset = v
+        RoutingStrategy::Smart => QuotaSortKey {
+            group: u8::from(v.remaining_fraction <= QUOTA_EXHAUSTED_EPS),
+            priority: v
                 .ms_until_reset
                 .map(|m| m.max(0) as f64)
-                .unwrap_or(f64::MAX / 4.0);
-            base + reset
-        }
+                .unwrap_or(f64::INFINITY),
+        },
         RoutingStrategy::Pace => {
             // 每毫秒剩余额度，越大越优先 → 取负做升序键。重置时间未知时按最小窗口兜底，
             // 退化为「剩余比例越大越优先」，仍是合理的保守选择。
@@ -115,10 +123,16 @@ fn quota_sort_key(strategy: RoutingStrategy, view: Option<&QuotaView>) -> f64 {
                 .ms_until_reset
                 .map(|m| (m as f64).max(PACE_MIN_WINDOW_MS))
                 .unwrap_or(PACE_MIN_WINDOW_MS);
-            -(v.remaining_fraction / window)
+            QuotaSortKey {
+                group: 0,
+                priority: -(v.remaining_fraction / window),
+            }
         }
         // 非额度感知策略不会走到这里；给个稳定值以满足编译器。
-        _ => 0.0,
+        _ => QuotaSortKey {
+            group: 0,
+            priority: 0.0,
+        },
     }
 }
 
@@ -826,8 +840,43 @@ mod tests {
 
     #[test]
     fn quota_sort_key_unknown_is_last() {
-        assert_eq!(quota_sort_key(RoutingStrategy::Smart, None), f64::INFINITY);
-        assert_eq!(quota_sort_key(RoutingStrategy::Pace, None), f64::INFINITY);
+        let known = QuotaView {
+            remaining_fraction: 0.0,
+            ms_until_reset: None,
+        };
+        for strategy in [RoutingStrategy::Smart, RoutingStrategy::Pace] {
+            assert!(quota_sort_key(strategy, Some(&known))
+                .total_cmp(&quota_sort_key(strategy, None))
+                .is_lt());
+        }
+    }
+
+    #[test]
+    fn smart_unknown_reset_still_prefers_available_quota() {
+        let available = QuotaView {
+            remaining_fraction: 0.5,
+            ms_until_reset: None,
+        };
+        let exhausted = QuotaView {
+            remaining_fraction: 0.0,
+            ms_until_reset: Some(3_600_000),
+        };
+        let exhausted_unknown = QuotaView {
+            remaining_fraction: 0.0,
+            ms_until_reset: None,
+        };
+        assert_eq!(
+            order_by(
+                RoutingStrategy::Smart,
+                &[
+                    ("unknown", None),
+                    ("exhausted", Some(exhausted)),
+                    ("exhausted-unknown", Some(exhausted_unknown)),
+                    ("available", Some(available)),
+                ],
+            ),
+            vec!["available", "exhausted", "exhausted-unknown", "unknown"]
+        );
     }
 
     #[test]

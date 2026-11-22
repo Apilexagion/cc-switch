@@ -352,7 +352,7 @@ pub fn wrap_sse_stream(
     let mut headers = response.headers().clone();
     // 重新切块后字节长度会变，且 SSE 本就是分块传输：移除 content-length，避免与实际不符。
     headers.remove(http::header::CONTENT_LENGTH);
-    let upstream = response.bytes_stream();
+    let upstream = crate::proxy::sse::bounded_sse_chunks(response.bytes_stream());
 
     // 原始上游分块经异步 reader 送入 raw 通道；阻塞 worker 读出做变换后送入 out 通道。
     let (raw_tx, mut raw_rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(16);
@@ -404,7 +404,10 @@ pub fn wrap_sse_stream(
                     }
                 }
                 Some(t) => {
-                    sse.push_bytes(&chunk);
+                    if let Err(error) = sse.push_bytes(&chunk) {
+                        let _ = out_tx.blocking_send(Err(error));
+                        return;
+                    }
                     while let Some(block) = sse.next_block() {
                         if out_tx.is_closed() {
                             return;

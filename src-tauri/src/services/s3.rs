@@ -383,12 +383,25 @@ pub(crate) async fn test_connection(creds: &S3Credentials) -> Result<(), AppErro
 }
 
 /// Upload bytes to an S3 object.
+#[cfg(test)]
 pub(crate) async fn put_object(
     creds: &S3Credentials,
     key: &str,
     bytes: Vec<u8>,
     content_type: &str,
 ) -> Result<(), AppError> {
+    put_object_conditional(creds, key, bytes, content_type, None)
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn put_object_conditional(
+    creds: &S3Credentials,
+    key: &str,
+    bytes: Vec<u8>,
+    content_type: &str,
+    condition: Option<&super::sync_protocol::ManifestPrecondition>,
+) -> Result<Option<String>, AppError> {
     let url_str = build_object_url(creds, key);
     let url = Url::parse(&url_str).map_err(|e| {
         AppError::localized(
@@ -401,7 +414,25 @@ pub(crate) async fn put_object(
     let client = http_client::get();
     let body_hash = sha256_hex(&bytes);
     let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("content-type", content_type.parse().unwrap());
+    headers.insert(
+        "content-type",
+        content_type
+            .parse()
+            .map_err(|_| AppError::Config("Invalid S3 content type".into()))?,
+    );
+    match condition {
+        Some(super::sync_protocol::ManifestPrecondition::Missing) => {
+            headers.insert("if-none-match", "*".parse().expect("static HTTP header"));
+        }
+        Some(super::sync_protocol::ManifestPrecondition::Match(etag)) => {
+            headers.insert(
+                "if-match",
+                etag.parse()
+                    .map_err(|_| AppError::Config("Invalid S3 ETag".into()))?,
+            );
+        }
+        None => {}
+    }
     sign_request(
         "PUT",
         &url,
@@ -420,8 +451,15 @@ pub(crate) async fn put_object(
         .await
         .map_err(|e| s3_transport_error("s3.put_failed", "PUT 请求", "PUT request", e))?;
 
+    if resp.status() == StatusCode::PRECONDITION_FAILED || resp.status() == StatusCode::CONFLICT {
+        return Err(super::sync_protocol::manifest_conflict());
+    }
     if resp.status().is_success() {
-        return Ok(());
+        return Ok(resp
+            .headers()
+            .get("etag")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string));
     }
     Err(s3_status_error("PUT", resp.status(), &url_str))
 }
@@ -555,6 +593,51 @@ mod tests {
     use chrono::TimeZone;
 
     // ── Crypto helpers ──
+
+    #[tokio::test]
+    async fn conditional_upload_signs_preconditions_and_preserves_conflict() {
+        use axum::{
+            http::{HeaderMap, StatusCode},
+            routing::put,
+            Router,
+        };
+        let app = Router::new().route(
+            "/bucket/manifest.json",
+            put(|headers: HeaderMap| async move {
+                assert_eq!(headers.get("if-match").unwrap(), "\"previous\"");
+                assert!(headers
+                    .get("authorization")
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .contains("if-match"));
+                StatusCode::PRECONDITION_FAILED
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let credentials = S3Credentials {
+            access_key_id: "fixture-key".into(),
+            secret_access_key: "fixture-secret".into(),
+            region: "fixture-region".into(),
+            bucket: "bucket".into(),
+            endpoint: format!("http://{}", listener.local_addr().unwrap()),
+        };
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let condition =
+            crate::services::sync_protocol::ManifestPrecondition::Match("\"previous\"".into());
+        assert!(put_object_conditional(
+            &credentials,
+            "manifest.json",
+            b"new".to_vec(),
+            "application/json",
+            Some(&condition)
+        )
+        .await
+        .is_err());
+        task.abort();
+    }
 
     #[test]
     fn sha256_hex_empty_body() {

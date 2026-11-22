@@ -230,28 +230,40 @@ pub async fn ensure_remote_directories(
     Ok(())
 }
 
-/// PUT bytes to a remote WebDAV URL.
-pub async fn put_bytes(
+pub(crate) async fn put_bytes_conditional(
     url: &str,
     auth: &WebDavAuth,
     bytes: Vec<u8>,
     content_type: &str,
-) -> Result<(), AppError> {
+    condition: Option<&super::sync_protocol::ManifestPrecondition>,
+) -> Result<Option<String>, AppError> {
     let client = http_client::get();
-    let resp = apply_auth(
-        client
-            .put(url)
-            .header("Content-Type", content_type)
-            .timeout(transfer_timeout(bytes.len() as u64))
-            .body(bytes),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|e| webdav_transport_error("webdav.put_failed", "PUT 请求", "PUT request", url, e))?;
-
+    let mut request = client
+        .put(url)
+        .header("Content-Type", content_type)
+        .timeout(transfer_timeout(bytes.len() as u64))
+        .body(bytes);
+    match condition {
+        Some(super::sync_protocol::ManifestPrecondition::Missing) => {
+            request = request.header("If-None-Match", "*");
+        }
+        Some(super::sync_protocol::ManifestPrecondition::Match(etag)) => {
+            request = request.header("If-Match", etag);
+        }
+        None => {}
+    }
+    let resp = apply_auth(request, auth).send().await.map_err(|error| {
+        webdav_transport_error("webdav.put_failed", "PUT 请求", "PUT request", url, error)
+    })?;
+    if resp.status() == StatusCode::PRECONDITION_FAILED {
+        return Err(super::sync_protocol::manifest_conflict());
+    }
     if resp.status().is_success() {
-        return Ok(());
+        return Ok(resp
+            .headers()
+            .get("etag")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string));
     }
     Err(webdav_status_error("PUT", resp.status(), url))
 }

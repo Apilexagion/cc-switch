@@ -15,7 +15,8 @@ impl ClaudeAccountManager {
             .unwrap(),
         )
         .unwrap();
-        let mut store = self.store.lock().await;
+        let mut cached = self.store.lock().await;
+        let store = cached.get_or_insert_with(StoreFile::default);
         store.accounts.insert(
             key.to_string(),
             AccountData {
@@ -117,7 +118,8 @@ async fn corrupt_local_id_never_resolves() {
     let tmp = tempfile::tempdir().unwrap();
     let manager = ClaudeAccountManager::new(tmp.path().to_path_buf());
     {
-        let mut store = manager.store.lock().await;
+        let mut cached = manager.store.lock().await;
+        let store = cached.get_or_insert_with(StoreFile::default);
         store.accounts.insert(
             "acc:".to_string(),
             AccountData {
@@ -235,7 +237,12 @@ async fn cancellation_after_authentication_prevents_account_commit() {
         .await
         .unwrap()
         .is_none());
-    assert!(manager.store.lock().await.accounts.is_empty());
+    assert!(manager
+        .store
+        .lock()
+        .await
+        .as_ref()
+        .is_none_or(|store| store.accounts.is_empty()));
     assert!(!tmp.path().join(STORE_FILENAME).exists());
     assert!(!manager.ended_flows().contains_key("flow"));
 }
@@ -256,7 +263,10 @@ async fn replacement_flow_invalidates_an_older_finished_login() {
         .await
         .unwrap()
         .is_some());
-    assert_eq!(load_store(tmp.path()).accounts[&found.key].local_id, new_id);
+    assert_eq!(
+        load_store(tmp.path()).unwrap().accounts[&found.key].local_id,
+        new_id
+    );
     assert!(!manager.ended_flows().contains_key("old"));
     assert!(matches!(
         manager.ended_flows().get("new"),
@@ -282,7 +292,12 @@ async fn cancellation_while_waiting_to_commit_is_checked_after_the_store_lock() 
     assert!(manager.cancel_login("flow").await);
     drop(held);
     assert!(pending.await.unwrap().unwrap().is_none());
-    assert!(manager.store.lock().await.accounts.is_empty());
+    assert!(manager
+        .store
+        .lock()
+        .await
+        .as_ref()
+        .is_none_or(|store| store.accounts.is_empty()));
 }
 
 #[tokio::test]
@@ -296,7 +311,12 @@ async fn failed_account_persistence_keeps_a_retryable_login_and_no_memory_commit
         .commit_finished_login("flow", generation, &local_id, &found, None)
         .await
         .is_err());
-    assert!(manager.store.lock().await.accounts.is_empty());
+    assert!(manager
+        .store
+        .lock()
+        .await
+        .as_ref()
+        .is_none_or(|store| store.accounts.is_empty()));
     assert!(matches!(
         manager.ended_flows().get("flow"),
         Some(FlowEnd::Retryable { local_id: id, generation: at }) if id == &local_id && *at == generation
@@ -312,7 +332,10 @@ async fn failed_account_persistence_keeps_a_retryable_login_and_no_memory_commit
         .await
         .unwrap()
         .is_some());
-    assert!(load_store(tmp.path()).accounts.contains_key(&found.key));
+    assert!(load_store(tmp.path())
+        .unwrap()
+        .accounts
+        .contains_key(&found.key));
 }
 
 #[tokio::test]
@@ -326,7 +349,7 @@ async fn removing_all_invalidates_a_finished_flow_before_its_commit() {
         .await
         .unwrap()
         .is_none());
-    assert!(load_store(tmp.path()).accounts.is_empty());
+    assert!(load_store(tmp.path()).unwrap().accounts.is_empty());
     assert!(manager.ended_flows().is_empty());
     assert!(manager.pending.lock().await.is_empty());
 }
@@ -349,4 +372,38 @@ async fn directory_signed_in_as_another_identity_requires_reauthentication() {
     )
     .unwrap();
     assert!(manager.list().await[0].requires_reauth);
+}
+
+#[tokio::test]
+async fn malformed_account_index_cannot_be_replaced_by_a_completed_login() {
+    let tmp = tempfile::tempdir().unwrap();
+    let manager = ClaudeAccountManager::new(tmp.path().to_path_buf());
+    let (local_id, generation, found) = finishing_fixture(&manager, "damaged-flow");
+    let path = tmp.path().join(STORE_FILENAME);
+    let damaged = b"{\"accounts\":";
+    std::fs::write(&path, damaged).unwrap();
+    assert!(manager
+        .commit_finished_login("damaged-flow", generation, &local_id, &found, None)
+        .await
+        .is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), damaged);
+    assert!(matches!(
+        manager.ended_flows().get("damaged-flow"),
+        Some(FlowEnd::Retryable { .. })
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn unreadable_account_index_cannot_be_atomically_overwritten() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join(STORE_FILENAME);
+    let original = serde_json::to_vec(&StoreFile::default()).unwrap();
+    std::fs::write(&path, &original).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    let result = persist_store(tmp.path(), &StoreFile::default());
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
 }

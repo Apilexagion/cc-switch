@@ -9,6 +9,68 @@ use serde_json::json;
 use std::collections::HashMap;
 use std::time::Duration;
 
+#[tokio::test]
+async fn ordinary_forwarding_does_not_follow_credentialed_redirects() {
+    use axum::{routing::any, Router};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let count = Arc::new(AtomicUsize::new(0));
+    let destination = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let destination_url = format!("http://{}/capture", destination.local_addr().unwrap());
+    let seen = count.clone();
+    let sink = Router::new().route(
+        "/capture",
+        any(move || {
+            let seen = seen.clone();
+            async move {
+                seen.fetch_add(1, Ordering::Relaxed);
+                "unexpected"
+            }
+        }),
+    );
+    let sink_task = tokio::spawn(async move {
+        axum::serve(destination, sink).await.unwrap();
+    });
+    let entrance = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}/entry", entrance.local_addr().unwrap());
+    let redirect = Router::new().route(
+        "/entry",
+        any(move || {
+            let target = destination_url.clone();
+            async move {
+                (
+                    StatusCode::TEMPORARY_REDIRECT,
+                    [(http::header::LOCATION, target)],
+                )
+            }
+        }),
+    );
+    let entrance_task = tokio::spawn(async move {
+        axum::serve(entrance, redirect).await.unwrap();
+    });
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-goog-api-key",
+        HeaderValue::from_static("placeholder-secret"),
+    );
+    let response = test_forwarder(Duration::from_secs(2), Duration::ZERO)
+        .send_upstream(
+            &url,
+            "test",
+            &http::Method::POST,
+            headers,
+            &Extensions::new(),
+            b"payload".to_vec(),
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    assert_eq!(count.load(Ordering::Relaxed), 0);
+    entrance_task.abort();
+    sink_task.abort();
+}
+
 #[test]
 fn opencode_upstream_host_matching() {
     // With or without a port, and subdomains, count as OpenCode; other

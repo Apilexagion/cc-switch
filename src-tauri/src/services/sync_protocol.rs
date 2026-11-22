@@ -27,7 +27,8 @@ pub(crate) use super::webdav_sync::archive::{
 /// Wire-format identifier stored in remote manifests.
 /// Retains historic "webdav" naming for backward compatibility with existing remotes.
 pub(crate) const PROTOCOL_FORMAT: &str = "cc-switch-webdav-sync";
-pub(crate) const PROTOCOL_VERSION: u32 = 2;
+pub(crate) const PROTOCOL_VERSION: u32 = 3;
+pub(crate) const PREVIOUS_PROTOCOL_VERSION: u32 = 2;
 pub(crate) const DB_COMPAT_VERSION: u32 = 6;
 pub(crate) const LEGACY_DB_COMPAT_VERSION: u32 = 5;
 pub(crate) const REMOTE_DB_SQL: &str = "db.sql";
@@ -164,6 +165,77 @@ pub(crate) struct SyncManifest {
 pub(crate) struct ArtifactMeta {
     pub sha256: String,
     pub size: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+}
+
+/// Preconditions are applied to the manifest only, after immutable artifacts
+/// have been uploaded. Servers without an ETag still publish a complete snapshot.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ManifestPrecondition {
+    Missing,
+    Match(String),
+}
+
+pub(crate) fn manifest_precondition(
+    remote: Option<(&[u8], Option<&str>)>,
+) -> Option<ManifestPrecondition> {
+    match remote {
+        None => Some(ManifestPrecondition::Missing),
+        Some((_, Some(etag))) if !etag.starts_with("W/") => {
+            Some(ManifestPrecondition::Match(etag.to_string()))
+        }
+        Some(_) => None,
+    }
+}
+
+pub(crate) fn manifest_conflict() -> AppError {
+    localized(
+        "sync.remote_changed",
+        "远端同步快照已被其他设备更新，请刷新后重试",
+        "The remote sync snapshot was updated by another device; refresh and retry",
+    )
+}
+
+pub(crate) fn snapshot_artifact_path(snapshot_id: &str, artifact: &str) -> String {
+    format!("snapshots/{snapshot_id}/{artifact}")
+}
+
+pub(crate) fn manifest_artifact_path(
+    manifest: &SyncManifest,
+    artifact: &str,
+) -> Result<String, AppError> {
+    let meta = manifest.artifacts.get(artifact).ok_or_else(|| {
+        localized(
+            "sync.manifest_missing_artifact",
+            format!("同步快照缺少 {artifact}"),
+            format!("Sync snapshot is missing {artifact}"),
+        )
+    })?;
+    if manifest.version == PREVIOUS_PROTOCOL_VERSION {
+        return Ok(artifact.to_string());
+    }
+    let id = &manifest.snapshot_id;
+    if id.len() != 64
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return Err(localized(
+            "sync.invalid_snapshot_id",
+            "同步快照标识无效",
+            "Invalid sync snapshot identifier",
+        ));
+    }
+    let expected = snapshot_artifact_path(id, artifact);
+    if meta.path.as_deref() != Some(expected.as_str()) {
+        return Err(localized(
+            "sync.invalid_artifact_path",
+            "同步快照文件路径无效",
+            "Invalid sync snapshot artifact path",
+        ));
+    }
+    Ok(expected)
 }
 
 pub(crate) struct LocalSnapshot {
@@ -171,11 +243,13 @@ pub(crate) struct LocalSnapshot {
     pub skills_zip: Vec<u8>,
     pub manifest_bytes: Vec<u8>,
     pub manifest_hash: String,
+    pub snapshot_id: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RemoteLayout {
     Current,
+    Previous,
     Legacy,
 }
 
@@ -183,6 +257,7 @@ impl RemoteLayout {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Current => "current",
+            Self::Previous => "previous",
             Self::Legacy => "legacy",
         }
     }
@@ -221,6 +296,7 @@ pub(crate) fn build_local_snapshot(
         ArtifactMeta {
             sha256: sha256_hex(&db_sql),
             size: db_sql.len() as u64,
+            path: None,
         },
     );
     artifacts.insert(
@@ -228,10 +304,24 @@ pub(crate) fn build_local_snapshot(
         ArtifactMeta {
             sha256: sha256_hex(&skills_zip),
             size: skills_zip.len() as u64,
+            path: None,
         },
     );
 
-    let snapshot_id = compute_snapshot_id(&artifacts);
+    validate_artifact_size_limit(REMOTE_DB_SQL, db_sql.len() as u64)?;
+    // Every upload attempt gets its own immutable namespace. Retrying after a
+    // server retained a partial object cannot collide with that failed attempt.
+    let snapshot_id = sha256_hex(
+        format!(
+            "{}:{}",
+            compute_snapshot_id(&artifacts),
+            uuid::Uuid::new_v4()
+        )
+        .as_bytes(),
+    );
+    for (name, meta) in &mut artifacts {
+        meta.path = Some(snapshot_artifact_path(&snapshot_id, name));
+    }
     let manifest = SyncManifest {
         format: PROTOCOL_FORMAT.to_string(),
         version: PROTOCOL_VERSION,
@@ -239,7 +329,7 @@ pub(crate) fn build_local_snapshot(
         device_name: detect_system_device_name().unwrap_or_else(|| "Unknown Device".to_string()),
         created_at: Utc::now().to_rfc3339(),
         artifacts,
-        snapshot_id,
+        snapshot_id: snapshot_id.clone(),
     };
     let manifest_bytes =
         serde_json::to_vec_pretty(&manifest).map_err(|e| AppError::JsonSerialize { source: e })?;
@@ -250,6 +340,7 @@ pub(crate) fn build_local_snapshot(
         skills_zip,
         manifest_bytes,
         manifest_hash,
+        snapshot_id,
     })
 }
 
@@ -289,7 +380,11 @@ pub(crate) fn validate_manifest_compat(
             ),
         ));
     }
-    if manifest.version != PROTOCOL_VERSION {
+    let expected_version = match layout {
+        RemoteLayout::Current => PROTOCOL_VERSION,
+        RemoteLayout::Previous | RemoteLayout::Legacy => PREVIOUS_PROTOCOL_VERSION,
+    };
+    if manifest.version != expected_version {
         return Err(localized(
             "sync.manifest_version_incompatible",
             format!(
@@ -310,7 +405,9 @@ pub(crate) fn validate_manifest_compat(
         ));
     };
     match layout {
-        RemoteLayout::Current if db_compat_version != DB_COMPAT_VERSION => {
+        RemoteLayout::Current | RemoteLayout::Previous
+            if db_compat_version != DB_COMPAT_VERSION =>
+        {
             return Err(localized(
                 "sync.manifest_db_version_incompatible",
                 format!(
@@ -416,11 +513,15 @@ pub(crate) fn apply_snapshot(
     let skills_backup = backup_current_skills()?;
 
     // Replace skills first, then import database; roll back skills on DB failure.
-    restore_skills_zip(skills_zip)?;
+    if let Err(error) = restore_skills_zip(skills_zip) {
+        return Err(skills_backup.rollback_after_import_error(error));
+    }
 
     if let Err(db_err) = db.import_sql_string_for_sync(sql_str) {
         return Err(skills_backup.rollback_after_import_error(db_err));
     }
+
+    skills_backup.commit();
 
     Ok(())
 }
@@ -568,6 +669,7 @@ mod tests {
         ArtifactMeta {
             sha256: sha256.to_string(),
             size,
+            path: None,
         }
     }
 
@@ -602,6 +704,94 @@ mod tests {
                 "{table} should not trigger automatic snapshot upload"
             );
         }
+    }
+
+    #[test]
+    fn immutable_snapshot_paths_preserve_previous_payloads_and_reject_path_escape() {
+        let mut first = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, Some(DB_COMPAT_VERSION));
+        first.snapshot_id = compute_snapshot_id(&first.artifacts);
+        for (name, meta) in &mut first.artifacts {
+            meta.path = Some(snapshot_artifact_path(&first.snapshot_id, name));
+        }
+        let old_path = manifest_artifact_path(&first, REMOTE_DB_SQL).unwrap();
+        let mut next = first.clone();
+        next.artifacts.get_mut(REMOTE_DB_SQL).unwrap().sha256 = "new-content".into();
+        next.snapshot_id = compute_snapshot_id(&next.artifacts);
+        for (name, meta) in &mut next.artifacts {
+            meta.path = Some(snapshot_artifact_path(&next.snapshot_id, name));
+        }
+        assert_ne!(
+            old_path,
+            manifest_artifact_path(&next, REMOTE_DB_SQL).unwrap()
+        );
+        // Publishing or abandoning a new snapshot never changes the old path.
+        assert_eq!(
+            old_path,
+            manifest_artifact_path(&first, REMOTE_DB_SQL).unwrap()
+        );
+        next.artifacts.get_mut(REMOTE_DB_SQL).unwrap().path = Some("../../outside".into());
+        assert!(manifest_artifact_path(&next, REMOTE_DB_SQL).is_err());
+        next.snapshot_id = "../escape".into();
+        assert!(manifest_artifact_path(&next, REMOTE_DB_SQL).is_err());
+    }
+
+    #[test]
+    fn previous_snapshot_format_keeps_fixed_paths_and_compatibility() {
+        let previous = manifest_with(
+            PROTOCOL_FORMAT,
+            PREVIOUS_PROTOCOL_VERSION,
+            Some(DB_COMPAT_VERSION),
+        );
+        assert!(validate_manifest_compat(&previous, RemoteLayout::Previous).is_ok());
+        assert!(validate_manifest_compat(&previous, RemoteLayout::Current).is_err());
+        assert_eq!(
+            manifest_artifact_path(&previous, REMOTE_DB_SQL).unwrap(),
+            REMOTE_DB_SQL
+        );
+        assert_eq!(
+            manifest_artifact_path(&previous, REMOTE_SKILLS_ZIP).unwrap(),
+            REMOTE_SKILLS_ZIP
+        );
+    }
+
+    #[test]
+    fn manifest_commit_uses_create_or_compare_and_swap_preconditions() {
+        assert_eq!(
+            manifest_precondition(None),
+            Some(ManifestPrecondition::Missing)
+        );
+        assert_eq!(
+            manifest_precondition(Some((b"old", Some("\"etag-a\"")))),
+            Some(ManifestPrecondition::Match("\"etag-a\"".into()))
+        );
+        assert_eq!(manifest_precondition(Some((b"old", None))), None);
+        assert_eq!(
+            manifest_precondition(Some((b"old", Some("W/\"weak\"")))),
+            None
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn failed_archive_or_sql_import_restores_the_original_skills() {
+        let _home = crate::test_support::TestHome::new();
+        crate::settings::reload_settings().unwrap();
+        let db = crate::database::Database::memory().unwrap();
+        let ssot = crate::services::skill::SkillService::get_ssot_dir().unwrap();
+        fs::write(ssot.join("marker.txt"), b"original").unwrap();
+        let sql = db.export_sql_string_for_sync().unwrap();
+        assert!(apply_snapshot(&db, sql.as_bytes(), b"not a zip").is_err());
+        assert_eq!(fs::read(ssot.join("marker.txt")).unwrap(), b"original");
+        let snapshot = build_local_snapshot(&db).unwrap();
+        assert!(apply_snapshot(&db, b"invalid SQL", &snapshot.skills_zip).is_err());
+        assert_eq!(fs::read(ssot.join("marker.txt")).unwrap(), b"original");
+        assert!(!fs::read_dir(ssot.parent().unwrap())
+            .unwrap()
+            .any(|entry| entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".skills-backup-")));
     }
 
     #[test]
@@ -698,7 +888,7 @@ mod tests {
 
     #[test]
     fn validate_manifest_compat_accepts_legacy_manifest_without_db_compat() {
-        let manifest = manifest_with(PROTOCOL_FORMAT, PROTOCOL_VERSION, None);
+        let manifest = manifest_with(PROTOCOL_FORMAT, PREVIOUS_PROTOCOL_VERSION, None);
         assert!(validate_manifest_compat(&manifest, RemoteLayout::Legacy).is_ok());
     }
 
@@ -716,7 +906,7 @@ mod tests {
     fn validate_manifest_compat_rejects_legacy_manifest_from_newer_db_generation() {
         let manifest = manifest_with(
             PROTOCOL_FORMAT,
-            PROTOCOL_VERSION,
+            PREVIOUS_PROTOCOL_VERSION,
             Some(DB_COMPAT_VERSION + 1),
         );
         assert!(validate_manifest_compat(&manifest, RemoteLayout::Legacy).is_err());
@@ -804,6 +994,7 @@ mod tests {
         let meta = ArtifactMeta {
             sha256: "0000000000000000000000000000000000000000000000000000000000000000".to_string(),
             size: 5,
+            path: None,
         };
         let bytes = b"hello";
         let err = verify_artifact(bytes, "test.bin", &meta)
@@ -820,6 +1011,7 @@ mod tests {
         let meta = ArtifactMeta {
             sha256: sha256_hex(data),
             size: data.len() as u64,
+            path: None,
         };
         assert!(verify_artifact(data, "test.bin", &meta).is_ok());
     }

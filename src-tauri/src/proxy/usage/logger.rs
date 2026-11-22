@@ -5,7 +5,10 @@ use super::parser::TokenUsage;
 use crate::app_config::AppType;
 use crate::database::{Database, PRICING_SOURCE_REQUEST, PRICING_SOURCE_RESPONSE};
 use crate::error::AppError;
-use crate::services::sql_helpers::{INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_TOTAL};
+use crate::services::sql_helpers::{
+    is_cache_inclusive_app, INPUT_TOKEN_SEMANTICS_FRESH, INPUT_TOKEN_SEMANTICS_LEGACY,
+    INPUT_TOKEN_SEMANTICS_TOTAL,
+};
 use crate::services::usage_stats::{find_model_pricing_row, is_placeholder_pricing_model};
 use rusqlite::OptionalExtension;
 use rust_decimal::Decimal;
@@ -39,6 +42,30 @@ struct UsageSemantic {
 }
 
 impl UsageSemantic {
+    /// Gateway token quotas count fresh input, output and cache writes, but not
+    /// cache reads. Match `fresh_input_sql` for both current and historical rows;
+    /// normalized FRESH rows must not be deducted again just because of app type.
+    fn gateway_billable_tokens(&self) -> i64 {
+        let input = i64::from(self.input_tokens);
+        let read = i64::from(self.cache_read_tokens);
+        let write = i64::from(self.cache_creation_tokens);
+        let fresh = if self.input_token_semantics == INPUT_TOKEN_SEMANTICS_FRESH
+            || !is_cache_inclusive_app(&self.app_type)
+        {
+            input
+        } else if self.input_token_semantics == INPUT_TOKEN_SEMANTICS_TOTAL && input >= read + write
+        {
+            input - read - write
+        } else if self.input_token_semantics == INPUT_TOKEN_SEMANTICS_LEGACY && input >= read {
+            input - read
+        } else {
+            // Preserve the existing normalization fallback for malformed or
+            // future semantics instead of subtracting untrusted counters.
+            input
+        };
+        fresh + i64::from(self.output_tokens) + write
+    }
+
     fn from_log(log: &RequestLog, input_token_semantics: i64) -> Self {
         Self {
             app_type: log.app_type.clone(),
@@ -286,13 +313,13 @@ impl<'a> UsageLogger<'a> {
             .iter()
             .map(|byte| format!("{byte:02x}"))
             .collect::<String>();
-        let tokens = i64::from(semantic.input_tokens)
-            + i64::from(semantic.output_tokens)
-            + i64::from(semantic.cache_creation_tokens);
+        let tokens = semantic.gateway_billable_tokens();
         conn.execute(
-            "INSERT OR IGNORE INTO forkdb.gateway_usage_ledger
+            "INSERT INTO forkdb.gateway_usage_ledger
              (usage_id, gateway_key_id, billable_tokens, total_cost_usd, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(usage_id) DO UPDATE SET billable_tokens = excluded.billable_tokens
+             WHERE billable_tokens != excluded.billable_tokens",
             rusqlite::params![usage_id, key_id, tokens, total_cost_usd, created_at],
         )
         .map_err(|e| AppError::Database(format!("记录网关配额用量失败: {e}")))?;
@@ -300,8 +327,10 @@ impl<'a> UsageLogger<'a> {
     }
 
     /// Called during schema initialization, before diagnostic-log pruning.
-    /// The same identity as live accounting makes repeated migrations/imports
-    /// and subsequent response replays harmless, including collision rows.
+    /// The same identity as live accounting corrects old token calculations in
+    /// place, including collision rows. Only rows with retained source details
+    /// are touched: pruned/diagnostics-disabled ledger entries stay intact.
+    /// Original timestamps and recorded costs are never rewritten on conflict.
     pub(crate) fn backfill_gateway_usage_on_conn(
         conn: &rusqlite::Connection,
     ) -> Result<(), AppError> {
@@ -767,6 +796,128 @@ mod tests {
         )?;
         assert_eq!(diagnostic_rows, 0);
         assert_eq!(ledger_rows, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn gateway_quota_counts_equivalent_cached_requests_equally() -> Result<(), AppError> {
+        let db = Database::memory()?;
+        let logger = UsageLogger::new(&db).with_diagnostic_logging(false);
+        for app in ["claude", "codex", "gemini", "grokbuild"] {
+            let mut log = request_log(app, 700);
+            log.app_type = app.to_string();
+            log.gateway_key_id = Some(app.to_string());
+            log.usage.input_tokens = if is_cache_inclusive_app(app) {
+                1000
+            } else {
+                700
+            };
+            log.usage.output_tokens = 50;
+            log.usage.cache_read_tokens = 200;
+            log.usage.cache_creation_tokens = 100;
+            logger.log_request(&log)?;
+            logger.log_request(&log)?;
+            assert_eq!(db.sum_gateway_key_usage(app, 0)?.0, 850, "{app}");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn gateway_normalization_matches_sql_for_legacy_and_current_semantics() -> Result<(), AppError>
+    {
+        let db = Database::memory()?;
+        let conn = crate::database::lock_conn!(db.conn);
+        let fresh_input = crate::services::sql_helpers::fresh_input_sql("");
+        let sql = format!(
+            "SELECT ({fresh_input}) + output_tokens + cache_creation_tokens
+             FROM (SELECT ?1 AS app_type, ?2 AS input_token_semantics,
+                          ?3 AS input_tokens, ?4 AS output_tokens,
+                          ?5 AS cache_read_tokens, ?6 AS cache_creation_tokens)"
+        );
+        for (app, semantics, input, expected) in [
+            ("codex", INPUT_TOKEN_SEMANTICS_TOTAL, 1000, 850),
+            ("codex", INPUT_TOKEN_SEMANTICS_LEGACY, 900, 850),
+            ("codex", INPUT_TOKEN_SEMANTICS_FRESH, 700, 850),
+            ("claude", INPUT_TOKEN_SEMANTICS_FRESH, 700, 850),
+            ("gemini", INPUT_TOKEN_SEMANTICS_TOTAL, 1000, 850),
+            ("grokbuild", INPUT_TOKEN_SEMANTICS_TOTAL, 1000, 850),
+            // Malformed counters and unknown future semantics retain the SQL
+            // fallback; no unsigned underflow or guessed cache deduction.
+            ("codex", INPUT_TOKEN_SEMANTICS_TOTAL, 100, 250),
+            ("codex", 99, 1000, 1150),
+        ] {
+            let semantic = UsageSemantic {
+                app_type: app.to_string(),
+                provider_id: "p".to_string(),
+                model: "m".to_string(),
+                input_token_semantics: semantics,
+                input_tokens: input,
+                output_tokens: 50,
+                cache_read_tokens: 200,
+                cache_creation_tokens: 100,
+                status_code: 200,
+            };
+            let sql_tokens: i64 = conn.query_row(
+                &sql,
+                rusqlite::params![app, semantics, input, 50, 200, 100],
+                |row| row.get(0),
+            )?;
+            assert_eq!(sql_tokens, expected, "{app}/{semantics}");
+            assert_eq!(
+                semantic.gateway_billable_tokens(),
+                sql_tokens,
+                "{app}/{semantics}"
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn gateway_backfill_corrects_retained_rows_without_erasing_pruned_usage() -> Result<(), AppError>
+    {
+        let db = Database::memory()?;
+        let mut log = request_log("retained", 1000);
+        log.gateway_key_id = Some("key-1".to_string());
+        log.usage.output_tokens = 50;
+        log.usage.cache_read_tokens = 200;
+        log.usage.cache_creation_tokens = 100;
+        UsageLogger::new(&db).log_request(&log)?;
+
+        let conn = crate::database::lock_conn!(db.conn);
+        // Model the previous unnormalized ledger calculation. A source-less
+        // row represents a request whose diagnostics were disabled or pruned.
+        conn.execute(
+            "UPDATE forkdb.gateway_usage_ledger
+             SET billable_tokens = 1150, total_cost_usd = '4.75', created_at = 11",
+            [],
+        )?;
+        conn.execute(
+            "INSERT INTO forkdb.gateway_usage_ledger VALUES ('pruned', 'key-1', 123, '0.25', 12)",
+            [],
+        )?;
+        for _ in 0..2 {
+            Database::backfill_gateway_usage_ledger_on_conn(&conn)?;
+        }
+        let corrected: (i64, String, i64) = conn.query_row(
+            "SELECT billable_tokens, total_cost_usd, created_at
+             FROM forkdb.gateway_usage_ledger WHERE usage_id != 'pruned'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(corrected, (850, "4.75".to_string(), 11));
+        let preserved: (i64, String, i64) = conn.query_row(
+            "SELECT billable_tokens, total_cost_usd, created_at
+             FROM forkdb.gateway_usage_ledger WHERE usage_id = 'pruned'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )?;
+        assert_eq!(preserved, (123, "0.25".to_string(), 12));
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM forkdb.gateway_usage_ledger",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 2);
         Ok(())
     }
 

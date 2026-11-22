@@ -25,11 +25,140 @@ use axum::{
     routing::{any, get, post},
     Router,
 };
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
+use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::sync::{oneshot, RwLock};
-use tokio::task::JoinHandle;
+use tokio::sync::{oneshot, watch, OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::task::{JoinHandle, JoinSet};
+
+const MAX_INBOUND_CONNECTIONS: usize = 512;
+const MAX_CONNECTIONS_PER_IP: usize = 64;
+const REQUEST_HEADER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const CONNECTION_DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+struct ConnectionBudget {
+    total: Arc<Semaphore>,
+    per_ip: std::sync::Mutex<HashMap<IpAddr, usize>>,
+    per_ip_limit: usize,
+}
+
+impl ConnectionBudget {
+    fn new(total: usize, per_ip_limit: usize) -> Arc<Self> {
+        Arc::new(Self {
+            total: Arc::new(Semaphore::new(total)),
+            per_ip: std::sync::Mutex::new(HashMap::new()),
+            per_ip_limit,
+        })
+    }
+
+    fn acquire(self: &Arc<Self>, ip: IpAddr) -> Option<ConnectionPermit> {
+        let total = self.total.clone().try_acquire_owned().ok()?;
+        let mut counts = self
+            .per_ip
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let count = counts.entry(ip).or_default();
+        if *count >= self.per_ip_limit {
+            return None;
+        }
+        *count += 1;
+        Some(ConnectionPermit {
+            budget: self.clone(),
+            ip,
+            _total: total,
+        })
+    }
+}
+
+struct ConnectionPermit {
+    budget: Arc<ConnectionBudget>,
+    ip: IpAddr,
+    _total: OwnedSemaphorePermit,
+}
+
+impl Drop for ConnectionPermit {
+    fn drop(&mut self) {
+        let mut counts = self
+            .budget
+            .per_ip
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(count) = counts.get_mut(&self.ip) {
+            *count -= 1;
+            if *count == 0 {
+                counts.remove(&self.ip);
+            }
+        }
+    }
+}
+
+async fn serve_proxy_connection(
+    stream: tokio::net::TcpStream,
+    remote_addr: SocketAddr,
+    app: Router,
+    mut shutdown: watch::Receiver<bool>,
+) {
+    if *shutdown.borrow() {
+        return;
+    }
+    let mut peek_buf = [0u8; 8192];
+    let peek = tokio::select! {
+        biased;
+        _ = shutdown.changed() => return,
+        result = tokio::time::timeout(REQUEST_HEADER_TIMEOUT, stream.peek(&mut peek_buf)) => result,
+    };
+    let original_cases = match peek {
+        Ok(Ok(0)) | Err(_) => return,
+        Ok(Ok(size)) => super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..size]),
+        Ok(Err(error)) => {
+            log::debug!("[ProxyServer] peek failed: {error}");
+            return;
+        }
+    };
+    let request_shutdown = shutdown.clone();
+    let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
+        let mut router = app.clone();
+        let cases = original_cases.clone();
+        let request_shutdown = request_shutdown.clone();
+        async move {
+            if *request_shutdown.borrow() {
+                return Ok::<_, std::convert::Infallible>(
+                    http::Response::builder()
+                        .status(http::StatusCode::SERVICE_UNAVAILABLE)
+                        .header(http::header::CONNECTION, "close")
+                        .body(axum::body::Body::empty())
+                        .expect("static shutdown response"),
+                );
+            }
+            let (mut parts, body) = req.into_parts();
+            parts.extensions.insert(cases);
+            parts
+                .extensions
+                .insert(super::gateway_auth::PeerAddr(remote_addr));
+            let req = http::Request::from_parts(parts, axum::body::Body::new(body));
+            <Router as tower::Service<http::Request<axum::body::Body>>>::call(&mut router, req)
+                .await
+        }
+    });
+    let connection = hyper::server::conn::http1::Builder::new()
+        .preserve_header_case(true)
+        .timer(TokioTimer::new())
+        .header_read_timeout(REQUEST_HEADER_TIMEOUT)
+        .serve_connection(TokioIo::new(stream), service);
+    tokio::pin!(connection);
+    let result = tokio::select! {
+        biased;
+        _ = shutdown.changed() => {
+            connection.as_mut().graceful_shutdown();
+            connection.await
+        },
+        result = &mut connection => result,
+    };
+    if let Err(error) = result {
+        log::debug!("[ProxyServer] connection ended: {error}");
+    }
+}
 
 /// 代理服务器状态（共享）
 #[derive(Clone)]
@@ -56,6 +185,7 @@ pub struct ProxyState {
 pub struct ProxyServer {
     config: ProxyConfig,
     state: ProxyState,
+    lifecycle: tokio::sync::Mutex<()>,
     shutdown_tx: Arc<RwLock<Option<oneshot::Sender<()>>>>,
     /// 服务器任务句柄，用于等待服务器实际关闭
     server_handle: Arc<RwLock<Option<JoinHandle<()>>>>,
@@ -100,12 +230,14 @@ impl ProxyServer {
         Self {
             config,
             state,
+            lifecycle: tokio::sync::Mutex::new(()),
             shutdown_tx: Arc::new(RwLock::new(None)),
             server_handle: Arc::new(RwLock::new(None)),
         }
     }
 
     pub async fn start(&self) -> Result<ProxyServerInfo, ProxyError> {
+        let _lifecycle = self.lifecycle.lock().await;
         // 检查是否已在运行
         if self.shutdown_tx.read().await.is_some() {
             return Err(ProxyError::AlreadyRunning);
@@ -151,81 +283,49 @@ impl ProxyServer {
         let state = self.state.clone();
         let handle = tokio::spawn(async move {
             let mut shutdown_rx = shutdown_rx;
+            let (connection_shutdown, receiver) = watch::channel(false);
+            let budget = ConnectionBudget::new(MAX_INBOUND_CONNECTIONS, MAX_CONNECTIONS_PER_IP);
+            let mut connections = JoinSet::new();
             loop {
                 tokio::select! {
+                    biased;
+                    _ = &mut shutdown_rx => break,
+                    _ = connections.join_next(), if !connections.is_empty() => {},
                     result = listener.accept() => {
                         let (stream, remote_addr) = match result {
-                            Ok(v) => v,
-                            Err(e) => {
-                                log::error!("[{SRV}] accept 失败: {e}", SRV = log_srv::ACCEPT_ERR);
+                            Ok(value) => value,
+                            Err(error) => {
+                                log::error!("[ProxyServer] accept failed: {error}");
                                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                 continue;
                             }
                         };
-
+                        let Some(permit) = budget.acquire(remote_addr.ip()) else {
+                            log::debug!("[ProxyServer] inbound connection budget exhausted");
+                            continue;
+                        };
                         let app = app.clone();
-                        tokio::spawn(async move {
-                            // Peek raw TCP bytes to capture original header casing
-                            // before hyper parses (and lowercases) the header names.
-                            let original_cases = {
-                                let mut peek_buf = vec![0u8; 8192];
-                                match stream.peek(&mut peek_buf).await {
-                                    Ok(n) => {
-                                        let cases = super::hyper_client::OriginalHeaderCases::from_raw_bytes(&peek_buf[..n]);
-                                        log::debug!(
-                                            "[ProxyServer] Peeked {} bytes, captured {} header casings",
-                                            n, cases.cases.len()
-                                        );
-                                        cases
-                                    }
-                                    Err(e) => {
-                                        log::debug!("[ProxyServer] peek failed (non-fatal): {e}");
-                                        super::hyper_client::OriginalHeaderCases::default()
-                                    }
-                                }
-                            };
-
-                            // service_fn 将 axum Router（tower::Service）桥接到 hyper
-                            let service = hyper::service::service_fn(move |req: hyper::Request<hyper::body::Incoming>| {
-                                let mut router = app.clone();
-                                let cases = original_cases.clone();
-                                async move {
-                                    // 将 hyper::body::Incoming 转为 axum::body::Body，保留 extensions
-                                    let (mut parts, body) = req.into_parts();
-
-                                    // Insert our own header case map alongside hyper's internal one
-                                    parts.extensions.insert(cases);
-
-                                    // Fork：注入入站对端地址，供 LAN 网关守卫中间件判定环回/非环回。
-                                    parts
-                                        .extensions
-                                        .insert(super::gateway_auth::PeerAddr(remote_addr));
-
-                                    let body = axum::body::Body::new(body);
-                                    let axum_req = http::Request::from_parts(parts, body);
-                                    <Router as tower::Service<http::Request<axum::body::Body>>>::call(&mut router, axum_req).await
-                                }
-                            });
-
-                            if let Err(e) = hyper::server::conn::http1::Builder::new()
-                                .preserve_header_case(true)
-                                .serve_connection(TokioIo::new(stream), service)
-                                .await
-                            {
-                                // Connection reset / broken pipe 等在代理场景下很常见，debug 级别
-                                log::debug!("[{SRV}] connection error: {e}", SRV = log_srv::CONN_ERR);
-                            }
+                        let shutdown = receiver.clone();
+                        connections.spawn(async move {
+                            let _permit = permit;
+                            serve_proxy_connection(stream, remote_addr, app, shutdown).await;
                         });
-                    }
-                    _ = &mut shutdown_rx => {
-                        break;
                     }
                 }
             }
-
-            // 服务器停止后更新状态
+            drop(listener);
+            let _ = connection_shutdown.send(true);
             state.status.write().await.running = false;
             *state.start_time.write().await = None;
+            if tokio::time::timeout(CONNECTION_DRAIN_TIMEOUT, async {
+                while connections.join_next().await.is_some() {}
+            })
+            .await
+            .is_err()
+            {
+                connections.abort_all();
+                while connections.join_next().await.is_some() {}
+            }
         });
 
         // 保存服务器任务句柄
@@ -239,6 +339,7 @@ impl ProxyServer {
     }
 
     pub async fn stop(&self) -> Result<(), ProxyError> {
+        let _lifecycle = self.lifecycle.lock().await;
         // 1. 发送关闭信号
         if let Some(tx) = self.shutdown_tx.write().await.take() {
             let _ = tx.send(());
@@ -247,8 +348,8 @@ impl ProxyServer {
         }
 
         // 2. 等待服务器任务结束（带 5 秒超时保护）
-        if let Some(handle) = self.server_handle.write().await.take() {
-            match tokio::time::timeout(std::time::Duration::from_secs(5), handle).await {
+        if let Some(mut handle) = self.server_handle.write().await.take() {
+            match tokio::time::timeout(std::time::Duration::from_secs(5), &mut handle).await {
                 Ok(Ok(())) => {
                     log::info!("[{}] 代理服务器已完全停止", log_srv::STOPPED);
                     Ok(())
@@ -258,6 +359,10 @@ impl ProxyServer {
                     Err(ProxyError::StopFailed(e.to_string()))
                 }
                 Err(_) => {
+                    handle.abort();
+                    let _ = handle.await;
+                    self.state.status.write().await.running = false;
+                    *self.state.start_time.write().await = None;
                     log::warn!(
                         "[{}] 代理服务器停止超时（5秒），强制继续",
                         log_srv::STOP_TIMEOUT
@@ -536,6 +641,97 @@ mod tests {
             0,
             "listener socket is inheritable"
         );
+    }
+
+    #[test]
+    fn inbound_connection_permits_bound_total_and_ip_and_release_on_drop() {
+        let budget = super::ConnectionBudget::new(3, 2);
+        let local = "127.0.0.1".parse().unwrap();
+        let other = "127.0.0.2".parse().unwrap();
+        let first = budget.acquire(local).unwrap();
+        let second = budget.acquire(local).unwrap();
+        assert!(budget.acquire(local).is_none());
+        let third = budget.acquire(other).unwrap();
+        assert!(budget.acquire(other).is_none());
+        drop(first);
+        let replacement = budget.acquire(local).unwrap();
+        drop((second, third, replacement));
+        assert!(budget.per_ip.lock().unwrap().is_empty());
+        assert_eq!(budget.total.available_permits(), 3);
+    }
+
+    #[tokio::test]
+    async fn stop_closes_existing_keep_alive_and_empty_connections() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let db = Arc::new(Database::memory().unwrap());
+        let proxy = ProxyServer::new(
+            ProxyConfig {
+                listen_port: 0,
+                ..Default::default()
+            },
+            db,
+            None,
+        );
+        let info = proxy.start().await.unwrap();
+        let mut active = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .unwrap();
+        let mut empty = tokio::net::TcpStream::connect(("127.0.0.1", info.port))
+            .await
+            .unwrap();
+        active
+            .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .await
+            .unwrap();
+        let mut response = Vec::new();
+        let mut block = [0; 1024];
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while !String::from_utf8_lossy(&response).contains("healthy") {
+                let size = active.read(&mut block).await.unwrap();
+                assert_ne!(size, 0);
+                response.extend_from_slice(&block[..size]);
+            }
+        })
+        .await
+        .unwrap();
+        proxy.stop().await.unwrap();
+        assert!(!proxy.get_status().await.running);
+        for stream in [&mut active, &mut empty] {
+            let mut tail = Vec::new();
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                stream.read_to_end(&mut tail),
+            )
+            .await;
+            assert!(
+                outcome.is_ok(),
+                "stopped connection must reach EOF or reset"
+            );
+            assert!(!String::from_utf8_lossy(&tail).contains("HTTP/1.1 200"));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn idle_connection_has_a_header_deadline() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let mut client = tokio::net::TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (stream, peer) = listener.accept().await.unwrap();
+        let (_shutdown, receiver) = tokio::sync::watch::channel(false);
+        let task = tokio::spawn(super::serve_proxy_connection(
+            stream,
+            peer,
+            axum::Router::new(),
+            receiver,
+        ));
+        tokio::task::yield_now().await;
+        tokio::time::advance(super::REQUEST_HEADER_TIMEOUT + std::time::Duration::from_secs(1))
+            .await;
+        task.await.unwrap();
+        let mut byte = [0];
+        assert_eq!(client.read(&mut byte).await.unwrap(), 0);
     }
 
     #[test]

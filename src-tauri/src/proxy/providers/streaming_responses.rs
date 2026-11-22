@@ -4614,7 +4614,7 @@ fn create_anthropic_sse_stream_from_responses_raw<E: std::error::Error + Send + 
         // Append an EOF sentinel so the same parser handles a final SSE event that
         // omitted its trailing blank line. The boolean distinguishes the sentinel
         // from a legitimate empty upstream chunk.
-        let stream = stream
+        let stream = crate::proxy::sse::bounded_sse_chunks(stream)
             .map(|result| (result, false))
             .chain(futures::stream::once(async {
                 (Ok::<Bytes, E>(Bytes::new()), true)
@@ -4624,7 +4624,10 @@ fn create_anthropic_sse_stream_from_responses_raw<E: std::error::Error + Send + 
         'stream_loop: while let Some((chunk, is_eof)) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    sse.push_bytes(&bytes);
+                    if let Err(error) = sse.push_bytes(&bytes) {
+                        yield Err(error);
+                        return;
+                    }
 
                     // A few compatible gateways ignore stream:true and return one
                     // JSON document. Hold it intact until EOF, including any pretty-
@@ -4664,7 +4667,10 @@ fn create_anthropic_sse_stream_from_responses_raw<E: std::error::Error + Send + 
                     }
 
                     if is_eof && !sse.pending().trim().is_empty() {
-                        sse.push_str("\n\n");
+                        if let Err(error) = sse.push_str("\n\n") {
+                            yield Err(error);
+                            return;
+                        }
                     }
 
                     // SSE 事件由 \n\n 分隔
@@ -4780,6 +4786,7 @@ fn backfill_anthropic_message_start_usage(
     // entire response usually arrives within a few seconds, which is an
     // acceptable cost for correct usage reporting.
     async_stream::stream! {
+        let stream = crate::proxy::sse::bounded_sse_chunks(stream);
         tokio::pin!(stream);
         let mut sse = SseBuffer::new();
         let mut events: Vec<(String, Value)> = Vec::new();
@@ -4788,7 +4795,10 @@ fn backfill_anthropic_message_start_usage(
         while let Some(item) = stream.next().await {
             match item {
                 Ok(bytes) => {
-                    sse.push_bytes(&bytes);
+                    if let Err(error) = sse.push_bytes(&bytes) {
+                        yield Err(error);
+                        return;
+                    }
                     while let Some(block) = sse.next_block() {
                         if block.trim().is_empty() {
                             continue;

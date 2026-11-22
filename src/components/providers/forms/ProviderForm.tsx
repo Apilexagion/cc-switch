@@ -331,6 +331,14 @@ const asRecord = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 
+const parseProviderJsonObject = (text: string): Record<string, unknown> => {
+  const value: unknown = JSON.parse(text.trim() || "{}");
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("JSON root must be an object");
+  }
+  return value as Record<string, unknown>;
+};
+
 type LocalProxyRequestOverridesBuildResult = ReturnType<
   typeof buildLocalProxyRequestOverrides
 >;
@@ -979,7 +987,7 @@ function ProviderFormFull({
         : "",
     );
 
-  const { configError: codexConfigError, debouncedValidate } =
+  const { configError: codexConfigError, debouncedValidate, validateToml } =
     useCodexTomlValidation();
 
   const handleCodexConfigChange = useCallback(
@@ -1465,7 +1473,21 @@ function ProviderFormFull({
   const shouldApplyLocalProxyRequestOverrides =
     (appId === "claude" || appId === "codex") && category !== "official";
 
+  const validateJsonDraft = () => {
+    const codexNeedsAuth = appId === "codex" &&
+      !isCodexOfficialManagedOauthBound && !wasCodexOfficialManagedOauthBound;
+    if (!codexNeedsAuth && !usesGeminiStyleForm(appId)) return true;
+    try {
+      parseProviderJsonObject(codexNeedsAuth ? codexAuth : geminiConfig);
+      return true;
+    } catch {
+      toast.error(t("common.invalidJson"));
+      return false;
+    }
+  };
+
   const handleSubmit = async (values: ProviderFormData) => {
+    if (!validateJsonDraft()) return;
     if (
       supportsBillingMultiplier &&
       !isValidBillingMultiplier(billingMultiplier)
@@ -1898,12 +1920,13 @@ function ProviderFormFull({
     let settingsConfig: string;
 
     if (appId === "codex") {
+      if (!validateToml(codexConfig ?? "")) return;
       try {
         const shouldStripCodexOfficialAuth =
           isCodexOfficialManagedOauthBound || wasCodexOfficialManagedOauthBound;
         const authJson = shouldStripCodexOfficialAuth
           ? {}
-          : JSON.parse(codexAuth);
+          : parseProviderJsonObject(codexAuth);
         const codexConfigForSave = codexConfig ?? "";
         let normalizedCodexConfig =
           category !== "official" && codexConfigForSave.trim()
@@ -1973,20 +1996,22 @@ function ProviderFormFull({
           configObj.modelAliases = serializedAliases;
         }
         settingsConfig = JSON.stringify(configObj);
-      } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+      } catch {
+        toast.error(t("common.invalidJson"));
+        return;
       }
     } else if (usesGeminiStyleForm(appId)) {
       try {
         const envObj = envStringToObj(geminiEnv);
-        const configObj = geminiConfig.trim() ? JSON.parse(geminiConfig) : {};
+        const configObj = parseProviderJsonObject(geminiConfig);
         const combined = {
           env: envObj,
           config: configObj,
         };
         settingsConfig = JSON.stringify(combined);
-      } catch (err) {
-        settingsConfig = values.settingsConfig.trim();
+      } catch {
+        toast.error(t("common.invalidJson"));
+        return;
       }
     } else if (
       appId === "opencode" &&

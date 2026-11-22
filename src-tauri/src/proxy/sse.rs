@@ -1,3 +1,39 @@
+use bytes::Bytes;
+use futures::{Stream, StreamExt};
+use std::io;
+
+/// A single unfinished event may not retain more than the existing response
+/// budget. This is deliberately not a limit on the length of a healthy stream.
+pub(crate) const MAX_SSE_EVENT_BYTES: usize = super::hyper_client::MAX_RESPONSE_BODY_BYTES;
+const SSE_INPUT_CHUNK_BYTES: usize = 64 * 1024;
+
+/// Split large transport chunks without copying their bytes. Consumers drain
+/// complete events between these pieces, so one chunk containing many small
+/// events cannot make the framer retain the entire transport chunk at once.
+pub(crate) fn bounded_sse_chunks<S, E>(stream: S) -> impl Stream<Item = Result<Bytes, E>>
+where
+    S: Stream<Item = Result<Bytes, E>>,
+{
+    async_stream::stream! {
+        futures::pin_mut!(stream);
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(bytes) => {
+                    if bytes.is_empty() {
+                        yield Ok(bytes);
+                        continue;
+                    }
+                    for start in (0..bytes.len()).step_by(SSE_INPUT_CHUNK_BYTES) {
+                        let end = (start + SSE_INPUT_CHUNK_BYTES).min(bytes.len());
+                        yield Ok(bytes.slice(start..end));
+                    }
+                }
+                Err(error) => yield Err(error),
+            }
+        }
+    }
+}
+
 #[inline]
 pub(crate) fn strip_sse_field<'a>(line: &'a str, field: &str) -> Option<&'a str> {
     let value = line.strip_prefix(field)?.strip_prefix(':')?;
@@ -79,7 +115,7 @@ impl<'a> Iterator for SseBlocks<'a> {
 /// dropped once per incoming chunk instead of once per event, and a scan that
 /// found no delimiter resumes near the end instead of rescanning a long
 /// partial event.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct SseBuffer {
     text: String,
     utf8_remainder: Vec<u8>,
@@ -87,6 +123,15 @@ pub(crate) struct SseBuffer {
     consumed: usize,
     /// Where the next delimiter scan starts; always `>= consumed`.
     scan_from: usize,
+    max_event_bytes: usize,
+    event_bytes: usize,
+    delimiter_tail: [u8; 2],
+}
+
+impl Default for SseBuffer {
+    fn default() -> Self {
+        Self::with_limit(MAX_SSE_EVENT_BYTES)
+    }
 }
 
 impl SseBuffer {
@@ -94,16 +139,91 @@ impl SseBuffer {
         Self::default()
     }
 
-    /// Append raw bytes; multi-byte characters split across chunks are held
-    /// back until complete (see [`append_utf8_safe`]).
-    pub(crate) fn push_bytes(&mut self, bytes: &[u8]) {
-        self.compact();
-        append_utf8_safe(&mut self.text, &mut self.utf8_remainder, bytes);
+    pub(crate) fn with_limit(max_event_bytes: usize) -> Self {
+        Self {
+            text: String::new(),
+            utf8_remainder: Vec::new(),
+            consumed: 0,
+            scan_from: 0,
+            max_event_bytes,
+            event_bytes: 0,
+            delimiter_tail: [0; 2],
+        }
     }
 
-    pub(crate) fn push_str(&mut self, text: &str) {
+    /// Append raw bytes; multi-byte characters split across chunks are held
+    /// back until complete (see [`append_utf8_safe`]).
+    pub(crate) fn push_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.compact();
+        self.check_append_bytes(bytes.len())?;
+        self.check_event_bytes(bytes)?;
+        append_utf8_safe(&mut self.text, &mut self.utf8_remainder, bytes);
+        self.check_retained_bytes()
+    }
+
+    pub(crate) fn push_str(&mut self, text: &str) -> io::Result<()> {
+        self.compact();
+        self.check_append_bytes(text.len())?;
+        self.check_event_bytes(text.as_bytes())?;
         self.text.push_str(text);
+        self.check_retained_bytes()
+    }
+
+    fn size_error(&mut self) -> io::Error {
+        self.text.clear();
+        self.utf8_remainder.clear();
+        self.consumed = 0;
+        self.scan_from = 0;
+        self.event_bytes = 0;
+        self.delimiter_tail = [0; 2];
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("SSE event exceeds {} byte limit", self.max_event_bytes),
+        )
+    }
+
+    /// Validate wire bytes before appending. Delimiters can cross chunk and
+    /// UTF-8 boundaries; their ASCII bytes are independent of UTF-8 decoding.
+    fn check_event_bytes(&mut self, bytes: &[u8]) -> io::Result<()> {
+        for &byte in bytes {
+            self.event_bytes = self.event_bytes.saturating_add(1);
+            if self.event_bytes > self.max_event_bytes {
+                return Err(self.size_error());
+            }
+            if byte == b'\n'
+                && (self.delimiter_tail[1] == b'\n' || self.delimiter_tail == [b'\n', b'\r'])
+            {
+                self.event_bytes = 0;
+                self.delimiter_tail = [0; 2];
+                continue;
+            }
+            self.delimiter_tail = [self.delimiter_tail[1], byte];
+        }
+        Ok(())
+    }
+
+    fn check_retained_bytes(&mut self) -> io::Result<()> {
+        // A consumer may intentionally keep a JSON fallback document instead
+        // of consuming its apparent SSE delimiters. Bound that retained data
+        // too, including worst-case UTF-8 replacement expansion of one chunk.
+        let budget = self
+            .max_event_bytes
+            .saturating_add(SSE_INPUT_CHUNK_BYTES * 3 + 3);
+        if self.text.len().saturating_add(self.utf8_remainder.len()) > budget {
+            return Err(self.size_error());
+        }
+        Ok(())
+    }
+
+    fn check_append_bytes(&mut self, incoming: usize) -> io::Result<()> {
+        let retained = self.text.len().saturating_add(self.utf8_remainder.len());
+        let budget = self
+            .max_event_bytes
+            .saturating_add(SSE_INPUT_CHUNK_BYTES * 3 + 3);
+        if retained.saturating_add(incoming) > budget {
+            return Err(self.size_error());
+        }
+        Ok(())
     }
 
     /// Next complete event (without its delimiter), or `None` until more data
@@ -134,6 +254,8 @@ impl SseBuffer {
         self.text.clear();
         self.consumed = 0;
         self.scan_from = 0;
+        self.event_bytes = self.utf8_remainder.len();
+        self.delimiter_tail = [0; 2];
     }
 
     /// End of stream: the pending text plus any incomplete UTF-8 tail,
@@ -145,6 +267,8 @@ impl SseBuffer {
             self.text.push_str(&String::from_utf8_lossy(&remainder));
         }
         self.scan_from = 0;
+        self.event_bytes = 0;
+        self.delimiter_tail = [0; 2];
         std::mem::take(&mut self.text)
     }
 
@@ -222,7 +346,65 @@ pub(crate) fn append_utf8_safe(buffer: &mut String, remainder: &mut Vec<u8>, new
 
 #[cfg(test)]
 mod tests {
-    use super::{append_utf8_safe, strip_sse_field, SseBlocks, SseBuffer};
+    use super::{
+        append_utf8_safe, bounded_sse_chunks, strip_sse_field, SseBlocks, SseBuffer,
+        SSE_INPUT_CHUNK_BYTES,
+    };
+    use bytes::Bytes;
+    use futures::{stream, StreamExt};
+
+    #[test]
+    fn oversized_incomplete_or_complete_event_is_rejected_before_append() {
+        for tail in ["x", "\n\n", "\r\n\r\n"] {
+            let mut sse = SseBuffer::with_limit(16);
+            sse.push_bytes(b"data: 1234567890").unwrap();
+            let error = sse.push_str(tail).unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            assert!(sse.pending().is_empty());
+        }
+    }
+
+    #[test]
+    fn event_budget_resets_at_consumed_delimiters_not_overlapping_newlines() {
+        let mut sse = SseBuffer::with_limit(8);
+        sse.push_bytes(b"a\n\n\n").unwrap();
+        assert_eq!(drain_blocks(&mut sse), ["a"]);
+        sse.push_bytes(b"1234567").unwrap();
+        assert!(sse.push_bytes(b"8").is_err());
+    }
+
+    #[test]
+    fn retained_fallback_document_is_bounded_even_if_it_contains_blank_lines() {
+        let mut sse = SseBuffer::with_limit(16);
+        let chunk = b"{}\n\n".repeat(SSE_INPUT_CHUNK_BYTES / 4);
+        // A JSON fallback consumer deliberately does not drain next_block().
+        for _ in 0..3 {
+            sse.push_bytes(&chunk).unwrap();
+        }
+        assert!(sse.push_bytes(&chunk).is_err());
+        assert!(sse.pending().is_empty());
+    }
+
+    #[tokio::test]
+    async fn one_large_transport_chunk_of_small_events_is_not_a_stream_size_limit() {
+        let events = 100_000;
+        let body = Bytes::from(b"data: x\n\n".repeat(events));
+        let stream = bounded_sse_chunks(stream::iter([Ok::<_, std::io::Error>(body)]));
+        futures::pin_mut!(stream);
+        let mut sse = SseBuffer::with_limit(16);
+        let mut count = 0;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.unwrap();
+            assert!(chunk.len() <= SSE_INPUT_CHUNK_BYTES);
+            sse.push_bytes(&chunk).unwrap();
+            while let Some(event) = sse.next_block() {
+                assert_eq!(event, "data: x");
+                count += 1;
+            }
+        }
+        assert_eq!(count, events);
+        assert!(sse.pending().is_empty());
+    }
 
     #[test]
     fn strip_sse_field_accepts_optional_space() {
@@ -260,7 +442,7 @@ mod tests {
             "data: {\"ok\":true}\r\n\r\nrest",
         ] {
             let mut sse = SseBuffer::new();
-            sse.push_str(input);
+            sse.push_str(input).unwrap();
 
             assert_eq!(drain_blocks(&mut sse), ["data: {\"ok\":true}"]);
             assert_eq!(sse.pending(), "rest");
@@ -278,7 +460,7 @@ mod tests {
                 let mut sse = SseBuffer::new();
                 let mut blocks = Vec::new();
                 for chunk in [&input[..split], &input[split..]] {
-                    sse.push_bytes(chunk.as_bytes());
+                    sse.push_bytes(chunk.as_bytes()).unwrap();
                     blocks.extend(drain_blocks(&mut sse));
                 }
                 assert_eq!(
@@ -291,7 +473,7 @@ mod tests {
 
             // A complete mixed delimiter must dispatch without another event.
             let mut sse = SseBuffer::new();
-            sse.push_str(&format!("{first}{delimiter}"));
+            sse.push_str(&format!("{first}{delimiter}")).unwrap();
             assert_eq!(drain_blocks(&mut sse), [first]);
             assert!(sse.pending().is_empty());
 
@@ -318,7 +500,7 @@ mod tests {
         let mut sse = SseBuffer::new();
         let mut blocks = Vec::new();
         for byte in input.as_bytes() {
-            sse.push_bytes(std::slice::from_ref(byte));
+            sse.push_bytes(std::slice::from_ref(byte)).unwrap();
             blocks.extend(drain_blocks(&mut sse));
         }
         assert_eq!(blocks, expected);
@@ -328,21 +510,21 @@ mod tests {
     #[test]
     fn sse_buffer_tail_and_clear() {
         let mut sse = SseBuffer::new();
-        sse.push_bytes(b"data: a\n\ndata: b");
+        sse.push_bytes(b"data: a\n\ndata: b").unwrap();
         assert_eq!(drain_blocks(&mut sse), ["data: a"]);
         // An incomplete multi-byte tail is held back until the stream ends.
-        sse.push_bytes(&"中".as_bytes()[..2]);
+        sse.push_bytes(&"中".as_bytes()[..2]).unwrap();
         assert_eq!(sse.pending(), "data: b");
         assert_eq!(sse.take_tail(), "data: b\u{FFFD}");
         assert!(sse.pending().is_empty());
 
         // `clear` drops pending text but keeps the incomplete character.
-        sse.push_bytes(b"{\"partial\"");
-        sse.push_bytes(&"中".as_bytes()[..1]);
+        sse.push_bytes(b"{\"partial\"").unwrap();
+        sse.push_bytes(&"中".as_bytes()[..1]).unwrap();
         sse.clear();
         assert!(sse.pending().is_empty());
-        sse.push_bytes(&"中".as_bytes()[1..]);
-        sse.push_str("\n\n");
+        sse.push_bytes(&"中".as_bytes()[1..]).unwrap();
+        sse.push_str("\n\n").unwrap();
         assert_eq!(drain_blocks(&mut sse), ["中"]);
     }
 

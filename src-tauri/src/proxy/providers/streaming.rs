@@ -269,12 +269,16 @@ fn create_anthropic_sse_stream_inner<E: std::error::Error + Send + 'static>(
         let mut tool_blocks_by_index: HashMap<usize, ToolBlockState> = HashMap::new();
         let mut open_tool_block_indices: HashSet<u32> = HashSet::new();
 
+        let stream = crate::proxy::sse::bounded_sse_chunks(stream);
         tokio::pin!(stream);
 
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    sse.push_bytes(&bytes);
+                    if let Err(error) = sse.push_bytes(&bytes) {
+                        yield Err(error);
+                        return;
+                    }
 
                     while let Some(line) = sse.next_block() {
                         if line.trim().is_empty() {
@@ -858,6 +862,7 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
     // Trade-off: live streaming UX is replaced by a single flush at upstream
     // completion, in exchange for correct usage reporting.
     async_stream::stream! {
+        let inner = crate::proxy::sse::bounded_sse_chunks(inner);
         tokio::pin!(inner);
         let mut sse = SseBuffer::new();
         let mut events: Vec<(String, Value)> = Vec::new();
@@ -866,7 +871,10 @@ pub fn create_anthropic_sse_stream<E: std::error::Error + Send + 'static>(
         while let Some(item) = inner.next().await {
             match item {
                 Ok(bytes) => {
-                    sse.push_bytes(&bytes);
+                    if let Err(error) = sse.push_bytes(&bytes) {
+                        yield Err(error);
+                        return;
+                    }
                     while let Some(block) = sse.next_block() {
                         if block.trim().is_empty() {
                             continue;

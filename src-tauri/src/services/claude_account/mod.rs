@@ -96,7 +96,14 @@ fn account_label(id: &str, email: Option<&str>, org_name: Option<&str>) -> Strin
 
 /// 按磁盘上的账号表给出每个账号的显示名（同 [`ClaudeAccount::label`]）：托盘拿不到管理器时用。
 pub fn labels_on_disk(data_dir: &Path) -> HashMap<String, String> {
-    load_store(data_dir)
+    let store = match load_store(data_dir) {
+        Ok(store) => store,
+        Err(error) => {
+            log::warn!("[ClaudeAccount] 无法读取账号显示名，原文件未改动: {error}");
+            return HashMap::new();
+        }
+    };
+    store
         .accounts
         .iter()
         .map(|(key, data)| {
@@ -134,7 +141,7 @@ struct PendingLogin {
 pub struct ClaudeAccountManager {
     data_dir: PathBuf,
     /// 账号表；同时充当所有改动的互斥锁
-    store: Mutex<StoreFile>,
+    store: Mutex<Option<StoreFile>>,
     pending: Mutex<HashMap<String, PendingLogin>>,
     /// 登录进程已经结束的流程。前端每 1.5 秒轮询一次、不等上一次返回：收录期间来的轮询
     /// 回「还没好」，收录完的回同一个账号，都不能报「登录已结束」。下次加号时清空。
@@ -152,6 +159,8 @@ fn store_file_guard() -> std::sync::MutexGuard<'static, ()> {
 }
 
 fn persist_store(data_dir: &Path, store: &StoreFile) -> Result<(), AppError> {
+    // Never overwrite an unreadable file with a cache/partial account table.
+    load_store(data_dir)?;
     let snapshot = StoreFile {
         version: 1,
         accounts: store.accounts.clone(),
@@ -161,18 +170,17 @@ fn persist_store(data_dir: &Path, store: &StoreFile) -> Result<(), AppError> {
     crate::config::atomic_write_private(&data_dir.join(STORE_FILENAME), &content)
 }
 
-fn load_store(data_dir: &Path) -> StoreFile {
+fn load_store(data_dir: &Path) -> Result<StoreFile, AppError> {
     let path = data_dir.join(STORE_FILENAME);
     match std::fs::read(&path) {
-        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|error| {
-            log::warn!("[ClaudeAccount] 账号文件解析失败，按空表处理: {error}");
-            StoreFile::default()
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
+            AppError::Config(format!(
+                "账号表 {} 无法解析，已保留原文件，请先修复或恢复备份",
+                path.display()
+            ))
         }),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => StoreFile::default(),
-        Err(error) => {
-            log::warn!("[ClaudeAccount] 账号文件读取失败，按空表处理: {error}");
-            StoreFile::default()
-        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(StoreFile::default()),
+        Err(error) => Err(AppError::io(&path, error)),
     }
 }
 
@@ -188,7 +196,13 @@ pub fn sync_shared(config_dir: &Path) {
 
 /// 同步本机全部账号目录的共享层（启动时、MCP 同步后）。
 pub fn sync_all_shared(data_dir: &Path) {
-    let store = load_store(data_dir);
+    let store = match load_store(data_dir) {
+        Ok(store) => store,
+        Err(error) => {
+            log::warn!("[ClaudeAccount] 无法读取账号表，已跳过共享层同步: {error}");
+            return;
+        }
+    };
     for data in store.accounts.values() {
         if !layout::valid_local_id(&data.local_id) {
             continue;
@@ -200,7 +214,7 @@ pub fn sync_all_shared(data_dir: &Path) {
 /// 不经管理器、直接按磁盘上的账号表解析账号目录（写 live 的路径上拿不到 Tauri 状态）。
 /// 账号表每次改动都会落盘，所以和管理器看到的一致。
 pub fn config_dir_on_disk(data_dir: &Path, account_id: &str) -> Option<PathBuf> {
-    let store = load_store(data_dir);
+    let store = load_store(data_dir).ok()?;
     let data = store.accounts.get(account_id)?;
     if !layout::valid_local_id(&data.local_id) {
         return None;
@@ -226,7 +240,13 @@ pub fn note_plan(data_dir: &Path, account: &str, plan: &AccountPlan) {
         return;
     }
     let _file = store_file_guard();
-    let mut store = load_store(data_dir);
+    let mut store = match load_store(data_dir) {
+        Ok(store) => store,
+        Err(error) => {
+            log::warn!("[ClaudeAccount] 无法读取账号表，已跳过套餐记录: {error}");
+            return;
+        }
+    };
     let Some(data) = store.accounts.get_mut(account) else {
         return;
     };
@@ -242,10 +262,11 @@ pub fn note_plan(data_dir: &Path, account: &str, plan: &AccountPlan) {
 
 impl ClaudeAccountManager {
     pub fn new(data_dir: PathBuf) -> Self {
-        let store = load_store(&data_dir);
         Self {
             data_dir,
-            store: Mutex::new(store),
+            // No empty account table is synthesized for an unreadable file.
+            // All operations load it strictly before using or replacing it.
+            store: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
             ended: std::sync::Mutex::new(HashMap::new()),
             login_generation: std::sync::Mutex::new(0),
@@ -257,6 +278,7 @@ impl ClaudeAccountManager {
     /// 新建账号目录，在里面启动 `claude auth login`，拿到登录链接后返回。
     /// Respect the authorization center browser preference without reviving abandoned logins.
     pub async fn start_login(&self, open_browser: bool) -> Result<LoginStart, AppError> {
+        load_store(&self.data_dir)?;
         let (generation, retryable) = self.begin_login_generation();
         for local_id in retryable {
             self.discard_dir(&local_id).await;
@@ -505,7 +527,19 @@ impl ClaudeAccountManager {
             return Ok(None);
         }
         let _file = store_file_guard();
-        let mut next = load_store(&self.data_dir);
+        let mut next = match load_store(&self.data_dir) {
+            Ok(store) => store,
+            Err(error) => {
+                ended.insert(
+                    flow_id.to_string(),
+                    FlowEnd::Retryable {
+                        local_id: local_id.to_string(),
+                        generation,
+                    },
+                );
+                return Err(error);
+            }
+        };
         let data = AccountData {
             local_id: local_id.to_string(),
             email: found
@@ -531,8 +565,8 @@ impl ClaudeAccountManager {
             );
             return Err(error);
         }
-        *store = next;
-        let account = to_account(&found.key, &store.accounts[&found.key], &self.data_dir);
+        let account = to_account(&found.key, &next.accounts[&found.key], &self.data_dir);
+        *store = Some(next);
         ended.insert(flow_id.to_string(), FlowEnd::Added(account.clone()));
         Ok(Some((account, replaced)))
     }
@@ -597,8 +631,17 @@ impl ClaudeAccountManager {
         let accounts: Vec<(String, AccountData)> = {
             let mut store = self.store.lock().await;
             // 切换时可能收录了新账号（默认槽位里原来的登录）
-            *store = load_store(&self.data_dir);
+            let loaded = match load_store(&self.data_dir) {
+                Ok(store) => store,
+                Err(error) => {
+                    log::warn!("[ClaudeAccount] 无法读取账号列表，原文件未改动: {error}");
+                    return Vec::new();
+                }
+            };
+            *store = Some(loaded);
             store
+                .as_ref()
+                .expect("account store was loaded")
                 .accounts
                 .iter()
                 .map(|(key, data)| (key.clone(), data.clone()))
@@ -629,11 +672,12 @@ impl ClaudeAccountManager {
     pub async fn remove(&self, account_id: &str) -> Result<(), AppError> {
         let mut store = self.store.lock().await;
         let file = store_file_guard();
-        *store = load_store(&self.data_dir);
-        let Some(data) = store.accounts.remove(account_id) else {
+        let mut next = load_store(&self.data_dir)?;
+        let Some(data) = next.accounts.remove(account_id) else {
             return Err(account_not_found());
         };
-        self.persist(&store)?;
+        self.persist(&next)?;
+        *store = Some(next);
         let _ = snapshot::update_state(&self.data_dir, |state| {
             state.login_expiry.remove(account_id);
         });
@@ -649,18 +693,18 @@ impl ClaudeAccountManager {
             let mut pending = self.pending.lock().await;
             // Lock order matches commit: account store, then generation/ended.
             // No synchronous guard is held across an await.
+            let _file = store_file_guard();
+            let loaded = load_store(&self.data_dir)?;
             let (_, retryable) = self.begin_login_generation();
             let pending = pending.drain().map(|(_, entry)| entry).collect::<Vec<_>>();
-            let _file = store_file_guard();
-            *store = load_store(&self.data_dir);
-            let removed = store
+            let removed = loaded
                 .accounts
                 .iter()
                 .map(|(key, data)| (key.clone(), data.clone()))
                 .collect::<Vec<_>>();
             let empty = StoreFile::default();
             let result = self.persist(&empty).map(|_| {
-                *store = empty;
+                *store = Some(empty);
                 let _ = snapshot::update_state(&self.data_dir, |state| state.login_expiry.clear());
                 removed
             });
@@ -780,7 +824,7 @@ impl snapshot::Adopter for DiskAccounts {
         sync_shared(&config_dir);
 
         let _file = store_file_guard();
-        let mut store = load_store(&self.data_dir);
+        let mut store = load_store(&self.data_dir)?;
         store.accounts.insert(
             found.key.clone(),
             AccountData {

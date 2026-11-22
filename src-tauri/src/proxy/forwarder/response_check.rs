@@ -307,7 +307,9 @@ impl RequestForwarder {
 
         let status = response.status();
         let headers = response.headers().clone();
-        let mut stream = Box::pin(response.bytes_stream());
+        let mut stream = Box::pin(crate::proxy::sse::bounded_sse_chunks(
+            response.bytes_stream(),
+        ));
         let mut replay_chunks: Vec<Bytes> = Vec::new();
         let mut sse = crate::proxy::sse::SseBuffer::new();
 
@@ -348,7 +350,9 @@ impl RequestForwarder {
                     "Failed while validating Responses stream start: {error}"
                 ))
             })?;
-            sse.push_bytes(&chunk);
+            sse.push_bytes(&chunk).map_err(|_| {
+                ProxyError::ResponseBodyTooLarge(crate::proxy::sse::MAX_SSE_EVENT_BYTES)
+            })?;
             replay_chunks.push(chunk);
 
             // Some compatible gateways ignore `stream:true` and return a complete
@@ -405,7 +409,9 @@ impl RequestForwarder {
         let deadline = tokio::time::Instant::now() + window;
         let status = response.status();
         let headers = response.headers().clone();
-        let mut stream = Box::pin(response.bytes_stream());
+        let mut stream = Box::pin(crate::proxy::sse::bounded_sse_chunks(
+            response.bytes_stream(),
+        ));
         let mut replay_chunks: Vec<Bytes> = Vec::new();
         let mut held_bytes = 0usize;
         let mut sse = crate::proxy::sse::SseBuffer::new();
@@ -420,7 +426,9 @@ impl RequestForwarder {
             // 还没有交出流，读出错和首包前出错一样回到重试循环。
             let chunk = chunk
                 .map_err(|error| ProxyError::ForwardFailed(format!("读取流式响应失败: {error}")))?;
-            sse.push_bytes(&chunk);
+            sse.push_bytes(&chunk).map_err(|_| {
+                ProxyError::ResponseBodyTooLarge(crate::proxy::sse::MAX_SSE_EVENT_BYTES)
+            })?;
             held_bytes += chunk.len();
             replay_chunks.push(chunk);
 

@@ -255,12 +255,16 @@ pub fn create_anthropic_sse_stream_from_gemini<E: std::error::Error + Send + 'st
         let mut latest_usage: Option<Value> = None;
         let mut latest_finish_reason: Option<String> = None;
         let mut blocked_text: Option<String> = None;
+        let stream = crate::proxy::sse::bounded_sse_chunks(stream);
         tokio::pin!(stream);
 
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    sse.push_bytes(&bytes);
+                    if let Err(error) = sse.push_bytes(&bytes) {
+                        yield Err(error);
+                        return;
+                    }
 
                     while let Some(block) = sse.next_block() {
                         if block.trim().is_empty() {

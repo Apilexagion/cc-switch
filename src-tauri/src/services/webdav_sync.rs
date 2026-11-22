@@ -1,26 +1,25 @@
-//! WebDAV v2 sync protocol layer with DB compatibility subdirectories.
+//! WebDAV immutable-snapshot sync with legacy v2 readers and DB compatibility subdirectories.
 //!
 //! Implements manifest-based synchronization on top of the HTTP transport
 //! primitives in [`super::webdav`]. Artifact set: `db.sql` + `skills.zip`.
-
-use std::collections::BTreeMap;
 
 use chrono::Utc;
 use serde_json::Value;
 
 use crate::error::AppError;
 use crate::services::webdav::{
-    auth_from_credentials, build_remote_url, ensure_remote_directories, get_bytes, head_etag,
-    path_segments, put_bytes, test_connection, WebDavAuth,
+    auth_from_credentials, build_remote_url, ensure_remote_directories, get_bytes, path_segments,
+    put_bytes_conditional, test_connection, WebDavAuth,
 };
 use crate::settings::{update_webdav_sync_status, WebDavSyncSettings, WebDavSyncStatus};
 
 use super::sync_protocol::{
     apply_snapshot, build_local_snapshot, effective_db_compat_version, localized,
-    persist_sync_success_best_effort, sha256_hex, validate_artifact_size_limit,
-    validate_manifest_compat, verify_artifact, ArtifactMeta, RemoteLayout, SyncManifest,
-    DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PROTOCOL_VERSION,
-    REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
+    manifest_artifact_path, manifest_precondition, persist_sync_success_best_effort, sha256_hex,
+    snapshot_artifact_path, validate_artifact_size_limit, validate_manifest_compat,
+    verify_artifact, ArtifactMeta, ManifestPrecondition, RemoteLayout, SyncManifest,
+    DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PREVIOUS_PROTOCOL_VERSION,
+    PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
 };
 
 #[cfg(test)]
@@ -66,30 +65,38 @@ pub async fn upload(
 
     let snapshot = build_local_snapshot(db)?;
 
-    // Upload order: artifacts first, manifest last (best-effort consistency)
-    let db_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_DB_SQL)?;
-    put_bytes(&db_url, &auth, snapshot.db_sql, "application/sql").await?;
-
-    let skills_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_SKILLS_ZIP)?;
-    put_bytes(&skills_url, &auth, snapshot.skills_zip, "application/zip").await?;
-
     let manifest_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_MANIFEST)?;
-    put_bytes(
+    let remote = get_bytes(&manifest_url, &auth, MAX_MANIFEST_BYTES).await?;
+    let condition = manifest_precondition(
+        remote
+            .as_ref()
+            .map(|(bytes, etag)| (bytes.as_slice(), etag.as_deref())),
+    );
+    let mut snapshot_dir = dir_segs;
+    snapshot_dir.extend(["snapshots".to_string(), snapshot.snapshot_id.clone()]);
+    ensure_remote_directories(&settings.base_url, &snapshot_dir, &auth).await?;
+    let db_url = remote_file_url(
+        settings,
+        RemoteLayout::Current,
+        &snapshot_artifact_path(&snapshot.snapshot_id, REMOTE_DB_SQL),
+    )?;
+    put_immutable_artifact(&db_url, &auth, snapshot.db_sql, "application/sql").await?;
+    let skills_url = remote_file_url(
+        settings,
+        RemoteLayout::Current,
+        &snapshot_artifact_path(&snapshot.snapshot_id, REMOTE_SKILLS_ZIP),
+    )?;
+    put_immutable_artifact(&skills_url, &auth, snapshot.skills_zip, "application/zip").await?;
+    // No published artifact is overwritten. A failed transfer leaves the last
+    // manifest pointing to its complete snapshot, even across concurrent writers.
+    let etag = put_bytes_conditional(
         &manifest_url,
         &auth,
         snapshot.manifest_bytes,
         MANIFEST_CONTENT_TYPE,
+        condition.as_ref(),
     )
     .await?;
-
-    // Fetch etag (best-effort, don't fail the upload)
-    let etag = match head_etag(&manifest_url, &auth).await {
-        Ok(e) => e,
-        Err(e) => {
-            log::debug!("[WebDAV] Failed to fetch ETag after upload: {e}");
-            None
-        }
-    };
 
     let _persisted = persist_sync_success_best_effort(
         settings,
@@ -98,6 +105,40 @@ pub async fn upload(
         persist_sync_success,
     );
     Ok(serde_json::json!({ "status": "uploaded" }))
+}
+
+async fn put_immutable_artifact(
+    url: &str,
+    auth: &WebDavAuth,
+    bytes: Vec<u8>,
+    content_type: &str,
+) -> Result<(), AppError> {
+    let meta = ArtifactMeta {
+        sha256: sha256_hex(&bytes),
+        size: bytes.len() as u64,
+        path: None,
+    };
+    match put_bytes_conditional(
+        url,
+        auth,
+        bytes,
+        content_type,
+        Some(&ManifestPrecondition::Missing),
+    )
+    .await
+    {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            // A concurrent writer or retry may have already published this
+            // content hash. Verify it without overwriting the complete object.
+            match get_bytes(url, auth, meta.size as usize).await {
+                Ok(Some((stored, _))) if verify_artifact(&stored, content_type, &meta).is_ok() => {
+                    Ok(())
+                }
+                _ => Err(error),
+            }
+        }
+    }
 }
 
 /// Download remote snapshot and apply to local database + skills.
@@ -125,7 +166,7 @@ pub async fn download(
         &auth,
         snapshot.layout,
         REMOTE_DB_SQL,
-        &snapshot.manifest.artifacts,
+        &snapshot.manifest,
     )
     .await?;
     let skills_zip = download_and_verify(
@@ -133,7 +174,7 @@ pub async fn download(
         &auth,
         snapshot.layout,
         REMOTE_SKILLS_ZIP,
-        &snapshot.manifest.artifacts,
+        &snapshot.manifest,
     )
     .await?;
 
@@ -206,6 +247,9 @@ async fn find_remote_snapshot(
     if let Some(snapshot) = fetch_remote_snapshot(settings, auth, RemoteLayout::Current).await? {
         return Ok(Some(snapshot));
     }
+    if let Some(snapshot) = fetch_remote_snapshot(settings, auth, RemoteLayout::Previous).await? {
+        return Ok(Some(snapshot));
+    }
     fetch_remote_snapshot(settings, auth, RemoteLayout::Legacy).await
 }
 
@@ -241,9 +285,9 @@ async fn download_and_verify(
     auth: &WebDavAuth,
     layout: RemoteLayout,
     artifact_name: &str,
-    artifacts: &BTreeMap<String, ArtifactMeta>,
+    manifest: &SyncManifest,
 ) -> Result<Vec<u8>, AppError> {
-    let meta = artifacts.get(artifact_name).ok_or_else(|| {
+    let meta = manifest.artifacts.get(artifact_name).ok_or_else(|| {
         localized(
             "webdav.sync.manifest_missing_artifact",
             format!("manifest 中缺少 artifact: {artifact_name}"),
@@ -252,7 +296,8 @@ async fn download_and_verify(
     })?;
     validate_artifact_size_limit(artifact_name, meta.size)?;
 
-    let url = remote_file_url(settings, layout, artifact_name)?;
+    let path = manifest_artifact_path(manifest, artifact_name)?;
+    let url = remote_file_url(settings, layout, &path)?;
     let (bytes, _) = get_bytes(&url, auth, MAX_SYNC_ARTIFACT_BYTES as usize)
         .await?
         .ok_or_else(|| {
@@ -272,8 +317,13 @@ async fn download_and_verify(
 fn remote_dir_segments(settings: &WebDavSyncSettings, layout: RemoteLayout) -> Vec<String> {
     let mut segs = Vec::new();
     segs.extend(path_segments(&settings.remote_root).map(str::to_string));
-    segs.push(format!("v{PROTOCOL_VERSION}"));
-    if layout == RemoteLayout::Current {
+    let version = if layout == RemoteLayout::Current {
+        PROTOCOL_VERSION
+    } else {
+        PREVIOUS_PROTOCOL_VERSION
+    };
+    segs.push(format!("v{version}"));
+    if layout != RemoteLayout::Legacy {
         segs.push(format!("db-v{DB_COMPAT_VERSION}"));
     }
     segs.extend(path_segments(&settings.profile).map(str::to_string));
@@ -305,6 +355,72 @@ fn auth_for(settings: &WebDavSyncSettings) -> WebDavAuth {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn manifest_compare_and_swap_refuses_a_concurrent_writer() {
+        use axum::{
+            body::Bytes,
+            extract::State,
+            http::{HeaderMap, StatusCode},
+            routing::get,
+            Router,
+        };
+        use std::sync::{Arc, Mutex};
+        let store = Arc::new(Mutex::new((b"published-a".to_vec(), 1usize)));
+        async fn read(State(store): State<Arc<Mutex<(Vec<u8>, usize)>>>) -> (HeaderMap, Vec<u8>) {
+            let (body, revision) = &*store.lock().unwrap();
+            let mut headers = HeaderMap::new();
+            headers.insert("etag", format!("\"{revision}\"").parse().unwrap());
+            (headers, body.clone())
+        }
+        async fn write(
+            State(store): State<Arc<Mutex<(Vec<u8>, usize)>>>,
+            headers: HeaderMap,
+            body: Bytes,
+        ) -> StatusCode {
+            let mut current = store.lock().unwrap();
+            let expected = format!("\"{}\"", current.1);
+            if headers
+                .get("if-match")
+                .and_then(|value| value.to_str().ok())
+                != Some(expected.as_str())
+            {
+                return StatusCode::PRECONDITION_FAILED;
+            }
+            *current = (body.to_vec(), current.1 + 1);
+            StatusCode::NO_CONTENT
+        }
+        let app = Router::new()
+            .route("/manifest", get(read).put(write))
+            .with_state(store.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/manifest", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        let (_, etag) = get_bytes(&url, &None, 1024).await.unwrap().unwrap();
+        let condition = ManifestPrecondition::Match(etag.unwrap());
+        put_bytes_conditional(
+            &url,
+            &None,
+            b"published-b".to_vec(),
+            "application/json",
+            Some(&condition),
+        )
+        .await
+        .unwrap();
+        assert!(put_bytes_conditional(
+            &url,
+            &None,
+            b"published-c".to_vec(),
+            "application/json",
+            Some(&condition)
+        )
+        .await
+        .is_err());
+        assert_eq!(store.lock().unwrap().0, b"published-b");
+        task.abort();
+    }
+
     #[test]
     fn remote_dir_segments_uses_current_layout() {
         let settings = WebDavSyncSettings {
@@ -313,7 +429,7 @@ mod tests {
             ..WebDavSyncSettings::default()
         };
         let segs = remote_dir_segments(&settings, RemoteLayout::Current);
-        assert_eq!(segs, vec!["cc-switch-sync", "v2", "db-v6", "default"]);
+        assert_eq!(segs, vec!["cc-switch-sync", "v3", "db-v6", "default"]);
     }
 
     #[test]

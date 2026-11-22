@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use tempfile::{tempdir, TempDir};
 use zip::write::SimpleFileOptions;
@@ -20,6 +20,83 @@ use crate::services::sync_protocol::{
 /// 就能超过原来的 10_000；与 `services/skill.rs` 的 `MAX_ARCHIVE_ENTRIES` 保持一致，
 /// 否则技能装得上、同步却恢复不了。字节上限 `MAX_SYNC_ARTIFACT_BYTES` 仍然兜底。
 const MAX_EXTRACT_ENTRIES: usize = 30_000;
+const MAX_ARCHIVE_PATH_DEPTH: usize = 128;
+const MAX_ARCHIVE_PATH_BYTES: usize = 4096;
+const FILESYSTEM_ENTRY_BYTES: u64 = 4096;
+
+/// Shared upload/restore allowance: count implicit parents and charge filesystem
+/// overhead as well as actual streamed file contents. A locally accepted archive
+/// must fit the same budget when another device restores it.
+struct ArchiveBudget {
+    entries: usize,
+    bytes: u64,
+    max_entries: usize,
+    max_bytes: u64,
+    directories: HashSet<PathBuf>,
+}
+
+impl Default for ArchiveBudget {
+    fn default() -> Self {
+        Self {
+            entries: 0,
+            bytes: 0,
+            max_entries: MAX_EXTRACT_ENTRIES,
+            max_bytes: MAX_SYNC_ARTIFACT_BYTES,
+            directories: HashSet::new(),
+        }
+    }
+}
+
+impl ArchiveBudget {
+    fn reserve_entry(&mut self) -> Result<(), AppError> {
+        if self.entries >= self.max_entries {
+            return Err(localized(
+                "webdav.sync.skills_zip_too_many_entries",
+                "Skills 归档的文件和目录数量超过上限",
+                "Skills archive has too many files and directories",
+            ));
+        }
+        if self.bytes.saturating_add(FILESYSTEM_ENTRY_BYTES) > self.max_bytes {
+            return Err(localized(
+                "webdav.sync.skills_zip_too_large",
+                "Skills 归档的内容及目录资源超过上限",
+                "Skills archive contents and directory resources are too large",
+            ));
+        }
+        self.entries += 1;
+        self.bytes += FILESYSTEM_ENTRY_BYTES;
+        Ok(())
+    }
+
+    fn reserve_path(&mut self, relative: &Path, directory: bool) -> Result<(), AppError> {
+        let components: Vec<_> = relative.components().collect();
+        if components.len() > MAX_ARCHIVE_PATH_DEPTH
+            || relative.to_string_lossy().len() > MAX_ARCHIVE_PATH_BYTES
+            || components
+                .iter()
+                .any(|part| !matches!(part, Component::Normal(_)))
+        {
+            return Err(localized(
+                "webdav.sync.skills_zip_invalid_path",
+                "Skills 归档路径越界、过长或嵌套过深",
+                "Skills archive path is unsafe, too long or too deeply nested",
+            ));
+        }
+        let mut path = PathBuf::new();
+        for (index, component) in components.iter().enumerate() {
+            path.push(component.as_os_str());
+            if directory || index + 1 < components.len() {
+                if !self.directories.contains(&path) {
+                    self.reserve_entry()?;
+                    self.directories.insert(path.clone());
+                }
+            } else {
+                self.reserve_entry()?;
+            }
+        }
+        Ok(())
+    }
+}
 
 pub(crate) struct SkillsBackup {
     temporary_dir: Option<TempDir>,
@@ -46,6 +123,7 @@ pub(crate) fn zip_skills_ssot(dest_path: &Path) -> Result<(), AppError> {
         .compression_method(zip::CompressionMethod::Deflated)
         .last_modified_time(DateTime::default());
 
+    let mut budget = ArchiveBudget::default();
     if source.exists() {
         let canonical_root = fs::canonicalize(&source).unwrap_or_else(|_| source.clone());
         let mut visited = HashSet::new();
@@ -56,20 +134,40 @@ pub(crate) fn zip_skills_ssot(dest_path: &Path) -> Result<(), AppError> {
             &mut writer,
             options,
             &mut visited,
+            &mut budget,
         )?;
     }
 
-    writer.finish().map_err(|e| {
+    let file = writer.finish().map_err(|e| {
         localized(
             "webdav.sync.skills_zip_write_failed",
             format!("写入 skills.zip 失败: {e}"),
             format!("Failed to write skills.zip: {e}"),
         )
     })?;
+    if file
+        .metadata()
+        .map_err(|e| AppError::io(dest_path, e))?
+        .len()
+        > MAX_SYNC_ARTIFACT_BYTES
+    {
+        return Err(localized(
+            "webdav.sync.skills_zip_too_large",
+            "Skills 归档压缩体超过同步上限",
+            "Compressed Skills archive exceeds the sync limit",
+        ));
+    }
     Ok(())
 }
 
 pub(crate) fn restore_skills_zip(raw: &[u8]) -> Result<(), AppError> {
+    if raw.len() as u64 > MAX_SYNC_ARTIFACT_BYTES {
+        return Err(localized(
+            "webdav.sync.skills_zip_too_large",
+            "Skills 归档压缩体超过同步上限",
+            "Compressed Skills archive exceeds the sync limit",
+        ));
+    }
     let tmp = tempdir().map_err(|e| {
         io_context_localized(
             "webdav.sync.skills_extract_tmpdir_failed",
@@ -107,35 +205,7 @@ pub(crate) fn restore_skills_zip(raw: &[u8]) -> Result<(), AppError> {
         ));
     }
 
-    let mut total_bytes: u64 = 0;
-    for idx in 0..archive.len() {
-        let mut entry = archive.by_index(idx).map_err(|e| {
-            localized(
-                "webdav.sync.skills_zip_entry_read_failed",
-                format!("读取 ZIP 项失败: {e}"),
-                format!("Failed to read ZIP entry: {e}"),
-            )
-        })?;
-        let Some(safe_name) = entry.enclosed_name() else {
-            continue;
-        };
-        let out_path = extracted.join(safe_name);
-        if entry.is_dir() {
-            fs::create_dir_all(&out_path).map_err(|e| AppError::io(&out_path, e))?;
-            continue;
-        }
-        if let Some(parent) = out_path.parent() {
-            fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
-        }
-        let mut out = fs::File::create(&out_path).map_err(|e| AppError::io(&out_path, e))?;
-        let _written = copy_entry_with_total_limit(
-            &mut entry,
-            &mut out,
-            &mut total_bytes,
-            MAX_SYNC_ARTIFACT_BYTES,
-            &out_path,
-        )?;
-    }
+    extract_skills_archive(&mut archive, &extracted, &mut ArchiveBudget::default())?;
 
     let ssot = SkillService::get_ssot_dir().map_err(|e| {
         localized(
@@ -145,6 +215,55 @@ pub(crate) fn restore_skills_zip(raw: &[u8]) -> Result<(), AppError> {
         )
     })?;
     replace_skills_dir(Some(&extracted), &ssot, &RealSkillsFs)
+}
+
+fn extract_skills_archive<R: Read + std::io::Seek>(
+    archive: &mut zip::ZipArchive<R>,
+    extracted: &Path,
+    budget: &mut ArchiveBudget,
+) -> Result<(), AppError> {
+    for idx in 0..archive.len() {
+        let mut entry = archive.by_index(idx).map_err(|e| {
+            localized(
+                "webdav.sync.skills_zip_entry_read_failed",
+                format!("读取 ZIP 项失败: {e}"),
+                format!("Failed to read ZIP entry: {e}"),
+            )
+        })?;
+        let safe_name = entry.enclosed_name().ok_or_else(|| {
+            localized(
+                "webdav.sync.skills_zip_invalid_path",
+                "Skills 归档包含越界路径",
+                "Skills archive contains an unsafe path",
+            )
+        })?;
+        if entry.is_symlink() {
+            return Err(localized(
+                "webdav.sync.skills_zip_invalid_path",
+                "Skills 同步归档不接受符号链接条目",
+                "Skills sync archives cannot contain symlink entries",
+            ));
+        }
+        // Reserve every implicit parent before creating anything on disk.
+        budget.reserve_path(&safe_name, entry.is_dir())?;
+        let out_path = extracted.join(safe_name);
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path).map_err(|e| AppError::io(&out_path, e))?;
+            continue;
+        }
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+        }
+        let mut out = fs::File::create(&out_path).map_err(|e| AppError::io(&out_path, e))?;
+        copy_entry_with_total_limit(
+            &mut entry,
+            &mut out,
+            &mut budget.bytes,
+            budget.max_bytes,
+            &out_path,
+        )?;
+    }
+    Ok(())
 }
 
 // Keep filesystem failures injectable without touching process-global state in tests.
@@ -279,38 +398,147 @@ pub(crate) fn backup_current_skills() -> Result<SkillsBackup, AppError> {
             format!("Failed to resolve Skills SSOT directory: {e}"),
         )
     })?;
-    let tmp = tempdir().map_err(|e| {
-        io_context_localized(
-            "webdav.sync.skills_backup_tmpdir_failed",
-            "创建 skills 备份临时目录失败",
-            "Failed to create temporary directory for skills backup",
-            e,
+    backup_skills_at(&ssot)
+}
+
+/// Preserve the exact tree and link identities on the same filesystem. Keep
+/// the current source available until the staged replacement is committed.
+fn backup_skills_at(ssot: &Path) -> Result<SkillsBackup, AppError> {
+    let parent = ssot.parent().ok_or_else(|| {
+        AppError::io(
+            ssot,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Skills path has no parent",
+            ),
         )
     })?;
+    fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+    let tmp = tempfile::Builder::new()
+        .prefix(".skills-backup-")
+        .tempdir_in(parent)
+        .map_err(|e| AppError::io(parent, e))?;
     let backup_dir = tmp.path().join("skills-backup");
-
-    let existed = ssot.exists();
+    let existed = fs::symlink_metadata(ssot).is_ok();
     if existed {
-        copy_dir_recursive(&ssot, &backup_dir)?;
+        copy_backup_tree(ssot, &backup_dir)?;
     }
-
     Ok(SkillsBackup {
         temporary_dir: Some(tmp),
         backup_dir,
-        ssot_path: ssot,
+        ssot_path: ssot.to_path_buf(),
         existed,
     })
 }
 
+fn copy_backup_tree(source: &Path, destination: &Path) -> Result<(), AppError> {
+    let metadata = fs::symlink_metadata(source).map_err(|error| AppError::io(source, error))?;
+    let copy = || -> std::io::Result<()> {
+        if metadata.file_type().is_symlink() {
+            let target = fs::read_link(source)?;
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(&target, destination)?;
+            #[cfg(windows)]
+            {
+                use std::os::windows::fs::MetadataExt;
+                if metadata.file_attributes() & 0x10 != 0 {
+                    std::os::windows::fs::symlink_dir(&target, destination)?;
+                } else {
+                    std::os::windows::fs::symlink_file(&target, destination)?;
+                }
+            }
+        } else if metadata.is_dir() {
+            fs::create_dir(destination)?;
+            for entry in fs::read_dir(source)? {
+                let entry = entry?;
+                copy_backup_tree(&entry.path(), &destination.join(entry.file_name()))
+                    .map_err(std::io::Error::other)?;
+            }
+            fs::set_permissions(destination, metadata.permissions())?;
+        } else if metadata.is_file() {
+            fs::copy(source, destination)?;
+        } else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Unsupported entry in Skills backup",
+            ));
+        }
+        Ok(())
+    };
+    copy().map_err(|error| AppError::io(source, error))
+}
+
 pub(crate) fn restore_skills_from_backup(backup: &SkillsBackup) -> Result<(), AppError> {
-    replace_skills_dir(
-        backup.existed.then_some(backup.backup_dir.as_path()),
-        &backup.ssot_path,
-        &RealSkillsFs,
-    )
+    if backup.existed {
+        fs::symlink_metadata(&backup.backup_dir)
+            .map_err(|e| AppError::io(&backup.backup_dir, e))?;
+    }
+    let parent = backup.ssot_path.parent().ok_or_else(|| {
+        AppError::io(
+            &backup.ssot_path,
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Skills path has no parent",
+            ),
+        )
+    })?;
+    let transaction = tempfile::Builder::new()
+        .prefix(".skills-restore-")
+        .tempdir_in(parent)
+        .map_err(|e| AppError::io(parent, e))?;
+    let incoming = transaction.path().join("failed-import");
+    // The incoming tree may be needed if restoring the old directory fails.
+    let transaction = transaction.keep();
+    let had_incoming = fs::symlink_metadata(&backup.ssot_path).is_ok();
+    if had_incoming {
+        if let Err(error) = fs::rename(&backup.ssot_path, &incoming) {
+            cleanup_skills_transaction(&transaction, &RealSkillsFs);
+            return Err(skills_rename_error(&backup.ssot_path, &incoming, error));
+        }
+    }
+    if backup.existed {
+        if let Err(error) = fs::rename(&backup.backup_dir, &backup.ssot_path) {
+            let restore_error = skills_rename_error(&backup.backup_dir, &backup.ssot_path, error);
+            if had_incoming {
+                if let Err(error) = fs::rename(&incoming, &backup.ssot_path) {
+                    return Err(localized(
+                        "webdav.sync.skills_replace_and_rollback_failed",
+                        format!("恢复原 Skills 失败: {restore_error}; 恢复导入目录也失败: {error}; 目录保留在 {}", incoming.display()),
+                        format!("Restoring original Skills failed: {restore_error}; restoring incoming Skills also failed: {error}; tree retained at {}", incoming.display()),
+                    ));
+                }
+            }
+            cleanup_skills_transaction(&transaction, &RealSkillsFs);
+            return Err(restore_error);
+        }
+    }
+    cleanup_skills_transaction(&transaction, &RealSkillsFs);
+    Ok(())
+}
+
+impl Drop for SkillsBackup {
+    fn drop(&mut self) {
+        // An unwind or forgotten commit must never delete the only original
+        // tree. Explicit commit/rollback consumes this guard and cleans it up.
+        if let Some(temporary) = self.temporary_dir.take() {
+            let retained = temporary.keep();
+            log::warn!(
+                "[Sync] Uncommitted original Skills retained at {}",
+                retained.display()
+            );
+        }
+    }
 }
 
 impl SkillsBackup {
+    pub(crate) fn commit(mut self) {
+        if let Some(temporary) = self.temporary_dir.take() {
+            if let Err(error) = temporary.close() {
+                log::warn!("[Sync] Skills backup cleanup failed after commit: {error}");
+            }
+        }
+    }
+
     pub(crate) fn rollback_after_import_error(self, db_error: AppError) -> AppError {
         self.rollback_after_import_error_with(db_error, restore_skills_from_backup)
     }
@@ -344,11 +572,23 @@ fn zip_dir_recursive(
     writer: &mut zip::ZipWriter<fs::File>,
     options: SimpleFileOptions,
     visited: &mut HashSet<PathBuf>,
+    budget: &mut ArchiveBudget,
 ) -> Result<(), AppError> {
-    let mut entries: Vec<_> = fs::read_dir(current)
-        .map_err(|e| AppError::io(current, e))?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| AppError::io(current, e))?;
+    let mut entries = Vec::new();
+    for entry in fs::read_dir(current).map_err(|e| AppError::io(current, e))? {
+        let entry = entry.map_err(|e| AppError::io(current, e))?;
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if entries.len() >= MAX_EXTRACT_ENTRIES {
+            return Err(localized(
+                "webdav.sync.skills_zip_too_many_entries",
+                "Skills 目录条目数超过同步上限",
+                "Skills directory has too many entries to sync",
+            ));
+        }
+        entries.push(entry);
+    }
     entries.sort_by_key(|e| e.file_name());
 
     for entry in entries {
@@ -403,6 +643,7 @@ fn zip_dir_recursive(
                 );
                 continue;
             }
+            budget.reserve_path(Path::new(&rel_str), true)?;
             writer
                 .add_directory(format!("{rel_str}/"), options)
                 .map_err(|e| {
@@ -412,8 +653,16 @@ fn zip_dir_recursive(
                         format!("Failed to write ZIP directory entry: {e}"),
                     )
                 })?;
-            zip_dir_recursive(root, &real_path, writer, options, visited)?;
+            zip_dir_recursive(root, &real_path, writer, options, visited, budget)?;
         } else {
+            // Only regular files are syncable; never open devices or FIFOs.
+            if !fs::metadata(&real_path)
+                .map_err(|e| AppError::io(&real_path, e))?
+                .is_file()
+            {
+                continue;
+            }
+            budget.reserve_path(Path::new(&rel_str), false)?;
             writer.start_file(&rel_str, options).map_err(|e| {
                 localized(
                     "webdav.sync.zip_start_file_failed",
@@ -422,16 +671,13 @@ fn zip_dir_recursive(
                 )
             })?;
             let mut file = fs::File::open(&real_path).map_err(|e| AppError::io(&real_path, e))?;
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)
-                .map_err(|e| AppError::io(&real_path, e))?;
-            writer.write_all(&buf).map_err(|e| {
-                localized(
-                    "webdav.sync.zip_write_file_failed",
-                    format!("写入 ZIP 文件内容失败: {e}"),
-                    format!("Failed to write ZIP file content: {e}"),
-                )
-            })?;
+            copy_entry_with_total_limit(
+                &mut file,
+                writer,
+                &mut budget.bytes,
+                budget.max_bytes,
+                &real_path,
+            )?;
         }
     }
     Ok(())
@@ -462,16 +708,10 @@ fn copy_dir_recursive_inner(
         let entry = entry.map_err(|e| AppError::io(src, e))?;
         let path = entry.path();
         let dest_path = dest.join(entry.file_name());
-        // Same entries zip_dir_recursive leaves out: there is nothing to copy, and
-        // failing here would fail every download at the pre-import backup.
+        // Only copy the regular extracted staging tree. Original Skills are
+        // backed up by copy_backup_tree, so no link needs dereferencing here.
         if is_link(&path) {
-            if let Err(error) = fs::canonicalize(&path) {
-                log::warn!(
-                    "[WebDAV] Skipping unresolvable link in skills: {}: {error}",
-                    path.display()
-                );
-                continue;
-            }
+            continue;
         }
         if path.is_dir() {
             copy_dir_recursive_inner(&path, &dest_path, visited)?;
@@ -555,7 +795,15 @@ mod tests {
                 .last_modified_time(zip::DateTime::default());
             let mut visited = HashSet::new();
             mark_visited_dir(&root, &mut visited).unwrap();
-            zip_dir_recursive(&root, &root, &mut writer, options, &mut visited).unwrap();
+            zip_dir_recursive(
+                &root,
+                &root,
+                &mut writer,
+                options,
+                &mut visited,
+                &mut super::super::ArchiveBudget::default(),
+            )
+            .unwrap();
             writer.finish().unwrap();
             zip::ZipArchive::new(fs::File::open(destination).unwrap()).unwrap()
         }
@@ -640,6 +888,45 @@ mod tests {
         }
 
         #[test]
+        fn failed_database_import_restores_external_and_dangling_link_identity() {
+            let temp = tempdir().unwrap();
+            let source = temp.path().join("skills");
+            fs::create_dir(&source).unwrap();
+            let outside = temp.path().join("outside.md");
+            fs::write(&outside, "private external marker").unwrap();
+            symlink("../outside.md", source.join("external.md")).unwrap();
+            symlink("missing.md", source.join("dangling.md")).unwrap();
+            let backup = super::super::backup_skills_at(&source).unwrap();
+            assert!(source.exists(), "backup must keep the source usable");
+            fs::remove_dir_all(&source).unwrap();
+            fs::create_dir(&source).unwrap();
+            fs::write(source.join("incoming.md"), "remote snapshot").unwrap();
+            let error = backup.rollback_after_import_error(crate::error::AppError::Message(
+                "invalid database".into(),
+            ));
+            assert_eq!(error.to_string(), "invalid database");
+            assert_eq!(
+                fs::read_link(source.join("external.md")).unwrap(),
+                Path::new("../outside.md")
+            );
+            assert_eq!(
+                fs::read_link(source.join("dangling.md")).unwrap(),
+                Path::new("missing.md")
+            );
+            assert_eq!(
+                fs::read_to_string(outside).unwrap(),
+                "private external marker"
+            );
+            assert!(!source.join("incoming.md").exists());
+            let archive = archive_dir(&source, &temp.path().join("after-rollback.zip"));
+            assert_eq!(
+                archive.len(),
+                0,
+                "external contents must still be excluded from upload"
+            );
+        }
+
+        #[test]
         fn copy_skips_links_that_do_not_resolve() {
             let temp = tempdir().unwrap();
             let source = temp.path().join("skills");
@@ -695,6 +982,117 @@ mod tests {
             0,
             "should not write when the first chunk exceeds limit"
         );
+    }
+
+    fn zip_payload(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (name, content) in entries {
+            writer
+                .start_file(*name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            std::io::Write::write_all(&mut writer, content).unwrap();
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn sync_upload_and_restore_use_the_same_whole_archive_budget() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("skills");
+        std::fs::create_dir_all(source.join("example")).unwrap();
+        std::fs::write(source.join("example/a.md"), "hello").unwrap();
+        std::fs::write(source.join("example/b.md"), "world").unwrap();
+        let root = source.canonicalize().unwrap();
+        let output = temp.path().join("skills.zip");
+        let mut writer = zip::ZipWriter::new(std::fs::File::create(&output).unwrap());
+        let mut upload = super::ArchiveBudget {
+            max_bytes: super::FILESYSTEM_ENTRY_BYTES * 3 + 10,
+            ..Default::default()
+        };
+        let mut visited = HashSet::new();
+        mark_visited_dir(&root, &mut visited).unwrap();
+        super::zip_dir_recursive(
+            &root,
+            &root,
+            &mut writer,
+            zip::write::SimpleFileOptions::default(),
+            &mut visited,
+            &mut upload,
+        )
+        .unwrap();
+        writer.finish().unwrap();
+        let destination = temp.path().join("restored");
+        std::fs::create_dir(&destination).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(output).unwrap()).unwrap();
+        let mut restore = super::ArchiveBudget {
+            max_bytes: upload.max_bytes,
+            ..Default::default()
+        };
+        super::extract_skills_archive(&mut archive, &destination, &mut restore).unwrap();
+        assert_eq!(
+            (upload.entries, upload.bytes),
+            (restore.entries, restore.bytes)
+        );
+        assert_eq!(restore.bytes, restore.max_bytes);
+        assert_eq!(
+            std::fs::read_to_string(destination.join("example/b.md")).unwrap(),
+            "world"
+        );
+    }
+
+    #[test]
+    fn sync_upload_rejects_aggregate_payload_before_emitting_an_unrestorable_archive() {
+        let temp = tempdir().unwrap();
+        let source = temp.path().join("skills");
+        std::fs::create_dir(&source).unwrap();
+        std::fs::write(source.join("a"), "hello").unwrap();
+        std::fs::write(source.join("b"), "world").unwrap();
+        let root = source.canonicalize().unwrap();
+        let mut writer =
+            zip::ZipWriter::new(std::fs::File::create(temp.path().join("skills.zip")).unwrap());
+        let mut budget = super::ArchiveBudget {
+            max_bytes: super::FILESYSTEM_ENTRY_BYTES * 2 + 8,
+            ..Default::default()
+        };
+        let mut visited = HashSet::new();
+        mark_visited_dir(&root, &mut visited).unwrap();
+        assert!(super::zip_dir_recursive(
+            &root,
+            &root,
+            &mut writer,
+            zip::write::SimpleFileOptions::default(),
+            &mut visited,
+            &mut budget,
+        )
+        .is_err());
+        assert!(budget.bytes <= budget.max_bytes);
+    }
+
+    #[test]
+    fn sync_restore_budgets_implicit_parents_before_making_directories() {
+        let temp = tempdir().unwrap();
+        let bytes = zip_payload(&[("a/b/c/empty", b"")]);
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        let mut budget = super::ArchiveBudget {
+            max_entries: 2,
+            ..Default::default()
+        };
+        assert!(super::extract_skills_archive(&mut archive, temp.path(), &mut budget).is_err());
+        assert!(!temp.path().join("a").exists());
+        assert_eq!(budget.entries, 2);
+    }
+
+    #[test]
+    fn sync_restore_rejects_excessive_depth_before_touching_the_tree() {
+        let temp = tempdir().unwrap();
+        let name = format!("{}file", "a/".repeat(super::MAX_ARCHIVE_PATH_DEPTH));
+        let bytes = zip_payload(&[(&name, b"")]);
+        let mut archive = zip::ZipArchive::new(Cursor::new(bytes)).unwrap();
+        assert!(
+            super::extract_skills_archive(&mut archive, temp.path(), &mut Default::default())
+                .is_err()
+        );
+        assert!(std::fs::read_dir(temp.path()).unwrap().next().is_none());
     }
 
     #[derive(Default)]
@@ -797,15 +1195,7 @@ mod tests {
         }
 
         fn backup(&self) -> super::SkillsBackup {
-            let tmp = tempdir().unwrap();
-            let backup_dir = tmp.path().join("skills-backup");
-            super::copy_dir_recursive(&self.live, &backup_dir).unwrap();
-            super::SkillsBackup {
-                temporary_dir: Some(tmp),
-                backup_dir,
-                ssot_path: self.live.clone(),
-                existed: true,
-            }
+            super::backup_skills_at(&self.live).unwrap()
         }
     }
 

@@ -9,7 +9,7 @@ use super::{
     handler_context::{RequestContext, StreamingTimeoutConfig},
     hyper_client::{ProxyResponse, MAX_RESPONSE_BODY_BYTES},
     server::ProxyState,
-    sse::{strip_sse_field, SseBuffer},
+    sse::{bounded_sse_chunks, strip_sse_field, SseBuffer},
     usage::parser::TokenUsage,
     ProxyError,
 };
@@ -20,6 +20,7 @@ use bytes::Bytes;
 use futures::stream::{Stream, StreamExt};
 use serde_json::Value;
 use std::{
+    borrow::Cow,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, OnceLock,
@@ -787,6 +788,81 @@ fn buffer_complete_sse_frames(pending: &mut bytes::BytesMut, bytes: &[u8]) -> Op
     Some(pending.split_to(end).freeze())
 }
 
+/// SSE joins all data fields in one event with a newline. Keep the common
+/// single-line case borrowed, and parse a multiline JSON event only once.
+fn sse_event_data(block: &str) -> Option<Cow<'_, str>> {
+    let mut lines = block
+        .lines()
+        .filter_map(|line| strip_sse_field(line, "data"));
+    let first = lines.next()?;
+    let Some(second) = lines.next() else {
+        return Some(Cow::Borrowed(first));
+    };
+    let mut data = String::with_capacity(first.len() + second.len() + 1);
+    data.push_str(first);
+    data.push('\n');
+    data.push_str(second);
+    for line in lines {
+        data.push('\n');
+        data.push_str(line);
+    }
+    Some(Cow::Owned(data))
+}
+
+async fn observe_sse_event(
+    collector: Option<&SseUsageCollector>,
+    block: &str,
+    loop_guard: bool,
+    loop_text: &mut String,
+    tag: &str,
+) -> Result<(), std::io::Error> {
+    let event_name = block
+        .lines()
+        .filter_map(|line| strip_sse_field(line, "event"))
+        .next_back();
+    let Some(data) = sse_event_data(block) else {
+        return Ok(());
+    };
+    if let Some(collector) = collector {
+        collector.observe_data(event_name, &data);
+    }
+    if data.trim() == "[DONE]" {
+        return Ok(());
+    }
+    let collect_usage = collector.is_some_and(|collector| collector.should_collect(&data));
+    let parsed = (collect_usage || loop_guard)
+        .then(|| serde_json::from_str::<Value>(&data).ok())
+        .flatten();
+    let mut collected = false;
+    if let Some(value) = parsed {
+        if loop_guard {
+            let delta = crate::proxy::reliability::extract_text_delta(event_name, &value);
+            if !delta.is_empty() {
+                loop_text.push_str(&delta);
+                if loop_text.len() > 8192 {
+                    let mut cut = loop_text.len() - 8192;
+                    while cut < loop_text.len() && !loop_text.is_char_boundary(cut) {
+                        cut += 1;
+                    }
+                    loop_text.drain(..cut);
+                }
+                if crate::proxy::reliability::tail_is_repeating(loop_text, 128, 30) {
+                    return Err(std::io::Error::other("检测到流式死循环，已切断"));
+                }
+            }
+        }
+        if let Some(collector) = collector.filter(|_| collect_usage) {
+            collector.push(value).await;
+            collected = true;
+        }
+    }
+    log::trace!(
+        "[{tag}] <<< SSE data: bytes={}, usage_collected={collected} (content omitted)",
+        data.len()
+    );
+    Ok(())
+}
+
 /// 创建带日志记录和超时控制的透传流
 pub fn create_logged_passthrough_stream(
     stream: impl Stream<Item = Result<Bytes, std::io::Error>> + Send + 'static,
@@ -802,8 +878,12 @@ pub fn create_logged_passthrough_stream(
         let mut finish_guard = collector.clone().map(SseUsageFinishGuard::new);
         // Fork：loop_guard 开启时也需要解析 SSE（累计文本做死循环检测）。
         let loop_guard = timeout_config.loop_guard;
-        let inspect_sse_events =
-            collector.is_some() || log::log_enabled!(log::Level::Debug) || loop_guard;
+        // Keepalive also retains incomplete output events, so apply the shared
+        // event budget even if diagnostics and usage collection are disabled.
+        let inspect_sse_events = collector.is_some()
+            || log::log_enabled!(log::Level::Debug)
+            || loop_guard
+            || timeout_config.keepalive_secs > 0;
         let mut is_first_chunk = true;
         // Fork：死循环检测的滚动文本窗口（只保留尾部若干 KB 以限成本）。
         let mut loop_text = String::new();
@@ -827,6 +907,7 @@ pub fn create_logged_passthrough_stream(
             None
         };
 
+        let stream = bounded_sse_chunks(stream);
         tokio::pin!(stream);
 
         'outer: loop {
@@ -889,74 +970,18 @@ pub fn create_logged_passthrough_stream(
                     }
                     is_first_chunk = false;
                     if inspect_sse_events {
-                        sse.push_bytes(&bytes);
+                        if let Err(error) = sse.push_bytes(&bytes) {
+                            yield Err(error);
+                            break 'outer;
+                        }
 
                         // 尝试解析并记录完整的 SSE 事件
                         while let Some(event_text) = sse.next_block() {
-                            if !event_text.trim().is_empty() {
-                                let event_name = event_text
-                                    .lines()
-                                    .find_map(|line| strip_sse_field(line, "event"));
-                                // 提取 data 部分；只有 usage collector 存在时才解析 JSON。
-                                for line in event_text.lines() {
-                                    if let Some(data) = strip_sse_field(line, "data") {
-                                        if let Some(c) = &collector {
-                                            c.observe_data(event_name, data);
-                                        }
-                                        if data.trim() != "[DONE]" {
-                                            let collected = match &collector {
-                                                Some(c) if c.should_collect(data) => {
-                                                    match serde_json::from_str::<Value>(data) {
-                                                        Ok(json_value) => {
-                                                            c.push(json_value).await;
-                                                            true
-                                                        }
-                                                        Err(_) => false,
-                                                    }
-                                                }
-                                                _ => false,
-                                            };
-                                            // Fork：死循环检测——累计文本增量，尾部短语级重复则切断。
-                                            if loop_guard {
-                                                if let Ok(jv) =
-                                                    serde_json::from_str::<Value>(data)
-                                                {
-                                                    let delta =
-                                                        crate::proxy::reliability::extract_text_delta(event_name, &jv);
-                                                    if !delta.is_empty() {
-                                                        loop_text.push_str(&delta);
-                                                        if loop_text.len() > 8192 {
-                                                            let mut cut = loop_text.len() - 8192;
-                                                            while cut < loop_text.len()
-                                                                && !loop_text.is_char_boundary(cut)
-                                                            {
-                                                                cut += 1;
-                                                            }
-                                                            loop_text.drain(..cut);
-                                                        }
-                                                        if crate::proxy::reliability::tail_is_repeating(
-                                                            &loop_text, 128, 30,
-                                                        ) {
-                                                            log::warn!(
-                                                                "[{tag}] 检测到流式死循环，切断响应"
-                                                            );
-                                                            yield Err(std::io::Error::other(
-                                                                "检测到流式死循环，已切断",
-                                                            ));
-                                                            break 'outer;
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            log::trace!(
-                                                "[{tag}] <<< SSE data: bytes={}, usage_collected={collected} (content omitted)",
-                                                data.len()
-                                            );
-                                        } else {
-                                            log::debug!("[{tag}] <<< SSE: [DONE]");
-                                        }
-                                    }
-                                }
+                            if let Err(error) = observe_sse_event(
+                                collector.as_ref(), event_text, loop_guard, &mut loop_text, tag,
+                            ).await {
+                                yield Err(error);
+                                break 'outer;
                             }
                         }
                     }
@@ -979,6 +1004,15 @@ pub fn create_logged_passthrough_stream(
                     break;
                 }
                 None => {
+                    if inspect_sse_events && !sse.pending().trim().is_empty() {
+                        let tail = sse.take_tail();
+                        if let Err(error) = observe_sse_event(
+                            collector.as_ref(), &tail, loop_guard, &mut loop_text, tag,
+                        ).await {
+                            yield Err(error);
+                            break 'outer;
+                        }
+                    }
                     // Preserve an upstream tail without a final delimiter at EOF.
                     if !pending_output.is_empty() {
                         yield Ok(pending_output.split().freeze());
@@ -1075,6 +1109,125 @@ mod tests {
             keepalive_secs,
             loop_guard,
         }
+    }
+
+    #[tokio::test]
+    async fn native_multiline_sse_preserves_bytes_and_records_usage_for_every_protocol() {
+        use crate::proxy::handler_config::{
+            CLAUDE_PARSER_CONFIG, CODEX_PARSER_CONFIG, GEMINI_PARSER_CONFIG, OPENAI_PARSER_CONFIG,
+        };
+
+        for (parser, source, expected_input, expected_output) in [
+            (
+                CLAUDE_PARSER_CONFIG,
+                concat!(
+                    "event: message_start\r\ndata: {\"type\":\"message_start\",\r\n",
+                    "data: \"message\":{\"id\":\"msg_multiline\",\"model\":\"claude\",\"usage\":{\"input_tokens\":100,\"output_tokens\":0}}}\r\n\r\n",
+                    "event: message_delta\r\ndata: {\"type\":\"message_delta\",\r\n",
+                    "data: \"usage\":{\"output_tokens\":25}}\r\n\r\n"
+                ),
+                100,
+                25,
+            ),
+            (
+                CODEX_PARSER_CONFIG,
+                concat!(
+                    "event: response.completed\ndata: {\"type\":\"response.completed\",\n",
+                    "data: \"response\":{\"id\":\"resp_multiline\",\"model\":\"gpt-test\",\"usage\":{\"input_tokens\":101,\"output_tokens\":26}}}\n\n"
+                ),
+                101,
+                26,
+            ),
+            (
+                OPENAI_PARSER_CONFIG,
+                concat!(
+                    "data: {\"id\":\"chat_multiline\",\"model\":\"chat-test\",\n",
+                    "data: \"usage\":{\"prompt_tokens\":102,\"completion_tokens\":27},\"choices\":[]}\n\n"
+                ),
+                102,
+                27,
+            ),
+            (
+                GEMINI_PARSER_CONFIG,
+                concat!(
+                    "data: {\"responseId\":\"gemini_multiline\",\"modelVersion\":\"gemini-test\",\n",
+                    "data: \"usageMetadata\":{\"promptTokenCount\":103,\"candidatesTokenCount\":28,\"totalTokenCount\":131}}\n\n"
+                ),
+                103,
+                28,
+            ),
+        ] {
+            // Exercise a split inside the data field itself, not just event
+            // boundaries, on the real passthrough/collector path.
+            for split in [0, source.len() / 2, source.len()] {
+                let captured = Arc::new(std::sync::Mutex::new(None));
+                let collector = SseUsageCollector::new(
+                    std::time::Instant::now(),
+                    parser.stream_event_filter,
+                    {
+                        let captured = captured.clone();
+                        move |events, _| {
+                            *captured.lock().unwrap() = (parser.stream_parser)(&events);
+                        }
+                    },
+                );
+                let upstream = futures::stream::iter(vec![
+                    Ok::<_, std::io::Error>(Bytes::copy_from_slice(&source.as_bytes()[..split])),
+                    Ok(Bytes::copy_from_slice(&source.as_bytes()[split..])),
+                ]);
+                let results: Vec<_> = create_logged_passthrough_stream(
+                    upstream,
+                    "multiline-test",
+                    Some(collector),
+                    reliability_timeouts(0, false),
+                    None,
+                )
+                .collect()
+                .await;
+                let bytes: Vec<_> = results
+                    .into_iter()
+                    .flat_map(|chunk| chunk.expect("passthrough").to_vec())
+                    .collect();
+                assert_eq!(bytes, source.as_bytes());
+                let usage = captured.lock().unwrap().clone().expect("parsed multiline usage");
+                assert_eq!(usage.input_tokens, expected_input, "{}", parser.app_type_str);
+                assert_eq!(usage.output_tokens, expected_output, "{}", parser.app_type_str);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn native_multiline_usage_at_eof_is_recorded_once() {
+        use crate::proxy::handler_config::OPENAI_PARSER_CONFIG;
+
+        let source = concat!(
+            "data: {\"id\":\"chat_eof\",\"model\":\"chat-test\",\n",
+            "data: \"usage\":{\"prompt_tokens\":12,\"completion_tokens\":7},\"choices\":[]}"
+        );
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let collector = SseUsageCollector::new(
+            std::time::Instant::now(),
+            OPENAI_PARSER_CONFIG.stream_event_filter,
+            {
+                let captured = captured.clone();
+                move |events, _| *captured.lock().unwrap() = events
+            },
+        );
+        let output: Vec<_> = create_logged_passthrough_stream(
+            futures::stream::once(async move { Ok(Bytes::from_static(source.as_bytes())) }),
+            "multiline-eof-test",
+            Some(collector),
+            reliability_timeouts(0, false),
+            None,
+        )
+        .collect()
+        .await;
+        assert_eq!(output.len(), 1);
+        assert_eq!(output[0].as_ref().unwrap().as_ref(), source.as_bytes());
+        let events = captured.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let usage = (OPENAI_PARSER_CONFIG.stream_parser)(&events).expect("EOF usage");
+        assert_eq!((usage.input_tokens, usage.output_tokens), (12, 7));
     }
 
     #[test]

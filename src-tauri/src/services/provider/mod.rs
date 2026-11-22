@@ -6375,6 +6375,90 @@ wire_api = "responses"
 
     #[test]
     #[serial]
+    fn universal_delete_and_disable_check_every_child_before_removing_any_rows() {
+        with_test_home(|state, _| {
+            let mut parent = UniversalProvider::new(
+                "protected".into(),
+                "Protected".into(),
+                "custom".into(),
+                "https://relay.example".into(),
+                "placeholder".into(),
+            );
+            parent.apps.claude = true;
+            parent.apps.codex = true;
+            parent.apps.gemini = true;
+            state.db.save_universal_provider(&parent).unwrap();
+            for app in [AppType::Claude, AppType::Codex, AppType::Gemini] {
+                let id = format!("universal-{app}-protected");
+                state
+                    .db
+                    .save_provider(
+                        &app,
+                        &Provider::with_id(id, "Child".into(), json!({}), None),
+                    )
+                    .unwrap();
+            }
+            crate::settings::set_current_provider(
+                &AppType::Codex,
+                Some("universal-codex-protected"),
+            )
+            .unwrap();
+            assert!(ProviderService::delete_universal(state, &parent.id).is_err());
+            parent.apps.codex = false;
+            assert!(ProviderService::upsert_universal(state, parent.clone()).is_err());
+            state.db.save_universal_provider(&parent).unwrap();
+            assert!(ProviderService::sync_universal_to_apps(state, &parent.id).is_err());
+            assert!(state
+                .db
+                .get_universal_provider(&parent.id)
+                .unwrap()
+                .is_some());
+            for app in [AppType::Claude, AppType::Codex, AppType::Gemini] {
+                assert!(state
+                    .db
+                    .provider_exists(&format!("universal-{app}-protected"), &app)
+                    .unwrap());
+            }
+        });
+    }
+
+    #[test]
+    #[serial]
+    fn universal_route_reference_remains_protected_even_when_direct_points_elsewhere() {
+        with_test_home(|state, _| {
+            let mut parent = UniversalProvider::new(
+                "route".into(),
+                "Route".into(),
+                "custom".into(),
+                "https://relay.example".into(),
+                "placeholder".into(),
+            );
+            parent.apps.claude = true;
+            let child = parent.to_claude_provider().unwrap();
+            state.db.save_universal_provider(&parent).unwrap();
+            state.db.save_provider(&AppType::Claude, &child).unwrap();
+            let direct = Provider::with_id("direct".into(), "Direct".into(), json!({}), None);
+            state.db.save_provider(&AppType::Claude, &direct).unwrap();
+            crate::settings::set_current_provider(&AppType::Claude, Some("direct")).unwrap();
+            crate::mode::state::update(&crate::live::engine::DeviceStore::for_device(), |live| {
+                let mode = live.apps.entry("claude".into()).or_default();
+                mode.mode = Some(crate::mode::state::Mode::Proxy);
+                mode.proxy_route = Some(child.id.clone());
+            })
+            .unwrap();
+            assert!(ProviderService::delete_universal(state, &parent.id).is_err());
+            assert_eq!(
+                crate::mode::current::provider_in_use(&state.db, &AppType::Claude)
+                    .unwrap()
+                    .unwrap()
+                    .id,
+                child.id
+            );
+        });
+    }
+
+    #[test]
+    #[serial]
     fn sync_universal_to_apps_preserves_child_metadata() {
         with_test_home(|state, _home| {
             let mut universal = UniversalProvider::new(
@@ -10190,53 +10274,104 @@ impl ProviderService {
         state.db.get_all_universal_providers()
     }
 
+    fn lock_universal_apps(
+        state: &AppState,
+    ) -> Result<Vec<Option<tokio::sync::OwnedMutexGuard<()>>>, AppError> {
+        // Every universal operation takes the same order. A regular per-app
+        // switch/edit therefore cannot race the deletion preflight or row save.
+        [AppType::Claude, AppType::Codex, AppType::Gemini]
+            .iter()
+            .map(|app| crate::mode::controller::lock_settled_blocking(state, app))
+            .collect()
+    }
+
+    fn disabled_universal_apps(provider: &UniversalProvider) -> Vec<AppType> {
+        [
+            (AppType::Claude, provider.apps.claude),
+            (AppType::Codex, provider.apps.codex),
+            (AppType::Gemini, provider.apps.gemini),
+        ]
+        .into_iter()
+        .filter_map(|(app, enabled)| (!enabled).then_some(app))
+        .collect()
+    }
+
+    fn check_universal_children_removable(
+        state: &AppState,
+        id: &str,
+        apps: &[AppType],
+    ) -> Result<(), AppError> {
+        for app in apps {
+            let child = format!("universal-{app}-{id}");
+            if crate::mode::current::is_referenced(&state.db, app, &child)? {
+                return Err(AppError::Message(format!(
+                    "{} 正在使用此统一供应商，请先切换到其他供应商再删除或关闭该应用",
+                    app.as_str()
+                )));
+            }
+        }
+        Ok(())
+    }
+
+    fn remove_universal_stack_members(
+        state: &AppState,
+        id: &str,
+        apps: &[AppType],
+    ) -> Result<(), AppError> {
+        for app in apps {
+            let child = format!("universal-{app}-{id}");
+            if crate::mode::stack::is_member(app, &child)? {
+                futures::executor::block_on(crate::mode::controller::set_stack_member_locked(
+                    state, app, &child, false,
+                ))
+                .map_err(AppError::Message)?;
+            }
+        }
+        Ok(())
+    }
+
     /// 添加或更新统一供应商（不自动同步，需手动调用 sync_universal_to_apps）
     pub fn upsert_universal(
         state: &AppState,
         provider: UniversalProvider,
     ) -> Result<bool, AppError> {
         icon::validate_icon(provider.icon.as_deref())?;
-        // 保存统一供应商
+        let _guards = Self::lock_universal_apps(state)?;
+        Self::check_universal_children_removable(
+            state,
+            &provider.id,
+            &Self::disabled_universal_apps(&provider),
+        )?;
         state.db.save_universal_provider(&provider)?;
-
         Ok(true)
     }
 
-    /// 删除统一供应商
+    /// Delete every generated child and its parent as one database transaction.
+    /// All references are checked before any row is changed, including children
+    /// left behind by an older disabled-app configuration.
     pub fn delete_universal(state: &AppState, id: &str) -> Result<bool, AppError> {
-        // 获取统一供应商（用于删除生成的子供应商）
-        let provider = state.db.get_universal_provider(id)?;
-
-        // 删除统一供应商
-        state.db.delete_universal_provider(id)?;
-
-        // 删除生成的子供应商
-        if let Some(p) = provider {
-            if p.apps.claude {
-                let claude_id = format!("universal-claude-{id}");
-                let _ = state.db.delete_provider(&AppType::Claude, &claude_id);
-            }
-            if p.apps.codex {
-                let codex_id = format!("universal-codex-{id}");
-                let _ = state.db.delete_provider(&AppType::Codex, &codex_id);
-            }
-            if p.apps.gemini {
-                let gemini_id = format!("universal-gemini-{id}");
-                let _ = state.db.delete_provider(&AppType::Gemini, &gemini_id);
-            }
-        }
-
-        Ok(true)
+        let _guards = Self::lock_universal_apps(state)?;
+        let apps = [AppType::Claude, AppType::Codex, AppType::Gemini];
+        Self::check_universal_children_removable(state, id, &apps)?;
+        Self::remove_universal_stack_members(state, id, &apps)?;
+        state.db.remove_universal_provider_children(id, &apps, true)
     }
 
     /// 同步统一供应商到各应用
     pub fn sync_universal_to_apps(state: &AppState, id: &str) -> Result<bool, AppError> {
+        let _guards = Self::lock_universal_apps(state)?;
         let provider = state
             .db
             .get_universal_provider(id)?
             .ok_or_else(|| AppError::Message(format!("统一供应商 {id} 不存在")))?;
         // 子供应商经 save_provider 直接入库，不走保存校验，图标在这里把关
         icon::validate_icon(provider.icon.as_deref())?;
+        let disabled_apps = Self::disabled_universal_apps(&provider);
+        Self::check_universal_children_removable(state, id, &disabled_apps)?;
+        Self::remove_universal_stack_members(state, id, &disabled_apps)?;
+        state
+            .db
+            .remove_universal_provider_children(id, &disabled_apps, false)?;
 
         // Keep DB and live projections in sync independently per application:
         // one broken config file must not prevent the other two apps from being
@@ -10265,10 +10400,6 @@ impl ProviderService {
                 &claude_provider.id,
                 &mut live_failures,
             );
-        } else {
-            // 如果禁用了 Claude，删除对应的子供应商
-            let claude_id = format!("universal-claude-{id}");
-            let _ = state.db.delete_provider(&AppType::Claude, &claude_id);
         }
 
         // 同步到 Codex
@@ -10293,9 +10424,6 @@ impl ProviderService {
                 &codex_provider.id,
                 &mut live_failures,
             );
-        } else {
-            let codex_id = format!("universal-codex-{id}");
-            let _ = state.db.delete_provider(&AppType::Codex, &codex_id);
         }
 
         // 同步到 Gemini
@@ -10320,9 +10448,6 @@ impl ProviderService {
                 &gemini_provider.id,
                 &mut live_failures,
             );
-        } else {
-            let gemini_id = format!("universal-gemini-{id}");
-            let _ = state.db.delete_provider(&AppType::Gemini, &gemini_id);
         }
 
         if live_failures.is_empty() {
@@ -10344,31 +10469,30 @@ impl ProviderService {
         child_id: &str,
         failures: &mut Vec<String>,
     ) {
-        // 正在用的那家（代理模式下是代理路由）才需要重投影。
-        let is_current = match crate::mode::current::provider_for(
-            &state.db,
-            &app_type,
-            crate::mode::current::Purpose::InUse,
-        ) {
-            Ok(current) => current.as_deref() == Some(child_id),
-            Err(err) => {
-                log::warn!(
-                    "读取 {} 当前供应商失败，跳过统一供应商的 live 重投影: {err}",
-                    app_type.as_str()
-                );
-                failures.push(app_type.as_str().to_string());
-                return;
+        // Caller owns all three switch locks. Use only the lock-free internal
+        // projection and include non-default Stack members in proxy refreshes.
+        let result = (|| -> Result<(), AppError> {
+            let Some(provider) = state.db.get_provider_by_id(child_id, &app_type)? else {
+                return Ok(());
+            };
+            if crate::mode::current::is_proxy(&app_type) {
+                return Self::resync_proxy_for_saved_row(state, &app_type, &provider);
             }
-        };
-        if !is_current {
-            return;
-        }
-
-        if let Err(err) = Self::sync_current_provider_for_app(state, app_type.clone()) {
-            log::warn!(
-                "统一供应商同步后重写 {} live 配置失败: {err}",
-                app_type.as_str()
-            );
+            if crate::mode::current::provider_for(
+                &state.db,
+                &app_type,
+                crate::mode::current::Purpose::InUse,
+            )?
+            .as_deref()
+                != Some(child_id)
+            {
+                return Ok(());
+            }
+            live::sync_live_for_provider_respecting_mode(state, &app_type, &provider, None)?;
+            crate::services::mcp::McpService::sync_enabled_for_app(state, &app_type)
+        })();
+        if let Err(error) = result {
+            log::warn!("统一供应商同步后重写 {app_type} live 配置失败: {error}");
             failures.push(app_type.as_str().to_string());
         }
     }

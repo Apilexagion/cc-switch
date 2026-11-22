@@ -150,7 +150,7 @@ pub struct AgyAccountManager {
     data_dir: PathBuf,
     login: Arc<dyn AgyLoginStore>,
     /// 账号表；同时充当所有改动（含写钥匙串）的互斥锁
-    store: Mutex<StoreFile>,
+    store: Mutex<Option<StoreFile>>,
     pending: Mutex<HashMap<String, PendingLogin>>,
 }
 
@@ -160,24 +160,23 @@ impl AgyAccountManager {
     }
 
     pub fn with_login_store(data_dir: PathBuf, login: Arc<dyn AgyLoginStore>) -> Self {
-        let path = data_dir.join(STORE_FILENAME);
-        let store = match std::fs::read(&path) {
-            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|error| {
-                log::warn!("[AgyAccount] 账号文件解析失败，按空表处理: {error}");
-                StoreFile::default()
-            }),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => StoreFile::default(),
-            Err(error) => {
-                log::warn!("[AgyAccount] 账号文件读取失败，按空表处理: {error}");
-                StoreFile::default()
-            }
-        };
         Self {
             data_dir,
             login,
-            store: Mutex::new(store),
+            store: Mutex::new(None),
             pending: Mutex::new(HashMap::new()),
         }
+    }
+
+    // Loading is lazy so a broken account file cannot become a writable empty
+    // account table during app startup. A repaired file can be retried in place.
+    async fn lock_store(&self) -> Result<tokio::sync::MappedMutexGuard<'_, StoreFile>, AppError> {
+        let mut cached = self.store.lock().await;
+        let on_disk = load_store(&self.data_dir)?;
+        *cached = Some(on_disk);
+        Ok(tokio::sync::MutexGuard::map(cached, |store| {
+            store.as_mut().expect("account store was loaded")
+        }))
     }
 
     // ---------- 浏览器登录 ----------
@@ -186,6 +185,7 @@ impl AgyAccountManager {
         if !keychain::supported() {
             return Err(keychain::unsupported_error());
         }
+        drop(self.lock_store().await?);
         let (listener, port) = oauth::bind_callback()
             .await
             .map_err(|error| AppError::Message(error.to_string()))?;
@@ -263,7 +263,7 @@ impl AgyAccountManager {
             .as_str()
             .and_then(oauth::identity)
             .ok_or_else(|| AppError::Message("Google 返回的身份信息不完整".into()))?;
-        let mut store = self.store.lock().await;
+        let mut store = self.lock_store().await?;
         let account = upsert(&mut store, credential, &claims);
         self.persist(&store)?;
         Ok(Some(account))
@@ -283,7 +283,7 @@ impl AgyAccountManager {
 
     /// 列出账号，并顺手把钥匙串里的最新登录收回来（agy 续期后的 access token、还没收录的号）。
     pub async fn status(&self) -> Result<AgyAccountStatus, AppError> {
-        let mut store = self.store.lock().await;
+        let mut store = self.lock_store().await?;
         let mut current = None;
         if keychain::supported() {
             match self.read_live(&store, false).await {
@@ -309,7 +309,7 @@ impl AgyAccountManager {
         if !keychain::supported() {
             return Err(keychain::unsupported_error());
         }
-        let mut store = self.store.lock().await;
+        let mut store = self.lock_store().await?;
         let target = store
             .accounts
             .get(account_id)
@@ -361,7 +361,7 @@ impl AgyAccountManager {
 
     /// 只删 CC Switch 里的副本。删的是 agy 正登着的号时记下来，免得查看状态时又被收回来。
     pub async fn remove(&self, account_id: &str) -> Result<(), AppError> {
-        let mut store = self.store.lock().await;
+        let mut store = self.lock_store().await?;
         let Some(removed) = store.accounts.remove(account_id) else {
             return Err(account_not_found(account_id));
         };
@@ -375,7 +375,7 @@ impl AgyAccountManager {
     }
 
     pub async fn remove_all(&self) -> Result<Vec<String>, AppError> {
-        let mut store = self.store.lock().await;
+        let mut store = self.lock_store().await?;
         let removed: Vec<String> = store.accounts.keys().cloned().collect();
         for (id, account) in std::mem::take(&mut store.accounts) {
             if !store.dismissed.contains(&id) {
@@ -390,7 +390,13 @@ impl AgyAccountManager {
     }
 
     pub async fn list(&self) -> Vec<AgyAccount> {
-        sorted_accounts(&*self.store.lock().await)
+        match self.lock_store().await {
+            Ok(store) => sorted_accounts(&store),
+            Err(error) => {
+                log::warn!("[AgyAccount] 无法读取账号列表，原文件未改动: {error}");
+                Vec::new()
+            }
+        }
     }
 
     // ---------- 额度 ----------
@@ -423,7 +429,7 @@ impl AgyAccountManager {
         if !keychain::supported() {
             return None;
         }
-        let mut store = self.store.lock().await;
+        let mut store = self.lock_store().await.ok()?;
         let live = match self.read_live(&store, false).await {
             Ok(live) => live,
             Err(error) => {
@@ -443,7 +449,10 @@ impl AgyAccountManager {
     /// 这个账号还能用的 access token。agy 在用的号先从钥匙串收回 agy 续过的那份。
     async fn access_token(&self, account_id: &str) -> Result<String, AccountQuotaError> {
         {
-            let mut store = self.store.lock().await;
+            let mut store = self
+                .lock_store()
+                .await
+                .map_err(|error| AccountQuotaError::Failed(error.to_string()))?;
             if keychain::supported() {
                 if let Ok(live) = self.read_live(&store, false).await {
                     if absorb(&mut store, live, false).1 {
@@ -470,7 +479,10 @@ impl AgyAccountManager {
     /// 续期并存回 CC Switch 的副本（不写钥匙串）。续期时不持锁，存回前确认副本没被换掉。
     async fn refresh_account(&self, account_id: &str) -> Result<String, AccountQuotaError> {
         let refresh_token = {
-            let store = self.store.lock().await;
+            let store = self
+                .lock_store()
+                .await
+                .map_err(|error| AccountQuotaError::Failed(error.to_string()))?;
             let account = store
                 .accounts
                 .get(account_id)
@@ -480,7 +492,10 @@ impl AgyAccountManager {
                 .to_string()
         };
         let outcome = oauth::refresh(&refresh_token).await;
-        let mut store = self.store.lock().await;
+        let mut store = self
+            .lock_store()
+            .await
+            .map_err(|error| AccountQuotaError::Failed(error.to_string()))?;
         let account = store.accounts.get_mut(account_id).filter(|account| {
             refresh_token_of(&account.credential) == Some(refresh_token.as_str())
         });
@@ -577,6 +592,9 @@ impl AgyAccountManager {
     }
 
     fn persist(&self, store: &StoreFile) -> Result<(), AppError> {
+        // An external permission/format error after startup must not be replaced
+        // by a write based on the last readable in-memory snapshot.
+        load_store(&self.data_dir)?;
         let snapshot = StoreFile {
             version: 1,
             accounts: store.accounts.clone(),
@@ -586,6 +604,20 @@ impl AgyAccountManager {
         let content = serde_json::to_vec_pretty(&snapshot)
             .map_err(|source| AppError::JsonSerialize { source })?;
         crate::config::atomic_write_private(&self.data_dir.join(STORE_FILENAME), &content)
+    }
+}
+
+fn load_store(data_dir: &std::path::Path) -> Result<StoreFile, AppError> {
+    let path = data_dir.join(STORE_FILENAME);
+    match std::fs::read(&path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|_| {
+            AppError::Config(format!(
+                "账号表 {} 无法解析，已保留原文件，请先修复或恢复备份",
+                path.display()
+            ))
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(StoreFile::default()),
+        Err(error) => Err(AppError::io(&path, error)),
     }
 }
 

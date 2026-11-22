@@ -748,7 +748,7 @@
       "saveAndTestSuccess": "Konfiguration gespeichert, Verbindung OK",
       "saveAndTestFailed": "Konfiguration gespeichert, aber der Verbindungstest ist fehlgeschlagen: {{error}}",
       "noRemoteData": "Auf dem Remote-Server wurden keine Synchronisierungsdaten gefunden",
-      "incompatibleVersion": "Remote-Daten sind inkompatibel (Protokoll v{{protocolVersion}}, Datenbank {{dbCompatVersion}}). Dieser Client unterstützt Protokoll v2 / db-v6.",
+      "incompatibleVersion": "Remote-Daten sind inkompatibel (Protokoll v{{protocolVersion}}, Datenbank {{dbCompatVersion}}). Dieser Client unterstützt Protokoll v3 / db-v6.",
       "unsaved": "Nicht gespeichert",
       "saved": "Gespeichert",
       "unsavedChanges": "Bitte speichern Sie zuerst die Konfiguration",
@@ -771,7 +771,7 @@
         "path": "Remote-Pfad",
         "dbCompat": "DB-Kompatibilität",
         "artifacts": "Inhalt",
-        "legacyNotice": "Ein alter Remote-Pfad wurde erkannt. Nach der Wiederherstellung schreibt der nächste Upload in den neuen v2/db-v6-Pfad.",
+        "legacyNotice": "Ein alter Remote-Pfad wurde erkannt. Nach der Wiederherstellung schreibt der nächste Upload in den neuen v3/db-v6-Pfad.",
         "warning": "Dadurch werden alle lokalen Daten und Skill-Konfigurationen überschrieben",
         "confirm": "Wiederherstellung bestätigen"
       },
@@ -787,7 +787,7 @@
         "path": "Remote-Pfad",
         "dbCompat": "DB-Kompatibilität",
         "warning": "Dadurch werden vorhandene Synchronisierungsdaten auf dem Remote-Server überschrieben",
-        "legacyNotice": "Alte Remote-Daten wurden erkannt. Dieser Upload schreibt in den neuen v2/db-v6-Pfad und überschreibt den alten Pfad nicht.",
+        "legacyNotice": "Alte Remote-Daten wurden erkannt. Dieser Upload schreibt in den neuen v3/db-v6-Pfad und überschreibt den alten Pfad nicht.",
         "confirm": "Upload bestätigen"
       }
     },
@@ -858,7 +858,7 @@
       "autoSyncLastErrorHint": "Bitte prüfen Sie das Netzwerk bzw. die S3-Einstellungen. Die automatische Synchronisierung wird bei künftigen Änderungen erneut versucht.",
       "missingBucket": "Bitte geben Sie den S3-Bucket ein",
       "noRemoteData": "Im S3-Bucket wurden keine Synchronisierungsdaten gefunden",
-      "incompatibleVersion": "Remote-Daten sind inkompatibel (Version {{version}}). Dieser Client unterstützt Protokoll v2 / db-v6.",
+      "incompatibleVersion": "Remote-Daten sind inkompatibel (Version {{version}}). Dieser Client unterstützt Protokoll v3 / db-v6.",
       "unsaved": "Nicht gespeichert",
       "saved": "Gespeichert",
       "clear": "Konfiguration löschen",

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import MarkdownEditor from "@/components/MarkdownEditor";
 import { FullScreenPanel } from "@/components/common/FullScreenPanel";
 import { workspaceApi } from "@/lib/api/workspace";
+import { useDraftLeaveConfirmation } from "@/hooks/useDraftLeaveConfirmation";
 
 interface WorkspaceFileEditorProps {
   filename: string;
@@ -18,12 +19,23 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
   onClose,
 }) => {
   const { t } = useTranslation();
+  const [activeFilename, setActiveFilename] = useState(filename);
   const [content, setContent] = useState("");
+  const [savedContent, setSavedContent] = useState("");
   const [loadedFile, setLoadedFile] = useState<string | null>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
   const [saving, setSaving] = useState(false);
+  const { requestLeave, confirmation } = useDraftLeaveConfirmation(
+    isOpen && loadedFile === activeFilename && content !== savedContent,
+    saving,
+  );
   const [isDarkMode, setIsDarkMode] = useState(false);
+
+  useEffect(() => {
+    if (filename === activeFilename) return;
+    requestLeave(() => setActiveFilename(filename));
+  }, [activeFilename, filename, requestLeave]);
 
   useEffect(() => {
     setIsDarkMode(document.documentElement.classList.contains("dark"));
@@ -39,15 +51,16 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
 
   useEffect(() => {
     setLoadedFile(null);
-    if (!isOpen || !filename) return;
+    if (!isOpen || !activeFilename) return;
 
     let cancelled = false;
     workspaceApi
-      .readFile(filename)
+      .readFile(activeFilename)
       .then((data) => {
         if (cancelled) return;
         setContent(data ?? "");
-        setLoadedFile(filename);
+        setSavedContent(data ?? "");
+        setLoadedFile(activeFilename);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -58,12 +71,13 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, filename, t]);
+  }, [isOpen, activeFilename, t]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      await workspaceApi.writeFile(filename, content);
+      await workspaceApi.writeFile(activeFilename, content);
+      setSavedContent(content);
       toast.success(t("workspace.saveSuccess"));
     } catch (err) {
       console.error("Failed to save workspace file:", err);
@@ -71,14 +85,15 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
     } finally {
       setSaving(false);
     }
-  }, [filename, content, t]);
+  }, [activeFilename, content, t]);
 
   return (
-    <FullScreenPanel
+    <>
+      <FullScreenPanel
       // Keep the file list visible until the editor content is ready.
-      isOpen={isOpen && loadedFile === filename}
-      title={t("workspace.editing", { filename })}
-      onClose={onClose}
+      isOpen={isOpen && loadedFile === activeFilename}
+      title={t("workspace.editing", { filename: activeFilename })}
+      onClose={() => requestLeave(onClose)}
       footer={
         <Button onClick={handleSave} disabled={saving}>
           {saving ? t("common.saving") : t("common.save")}
@@ -89,10 +104,12 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
         value={content}
         onChange={setContent}
         darkMode={isDarkMode}
-        placeholder={`# ${filename}\n\n...`}
+        placeholder={`# ${activeFilename}\n\n...`}
         minHeight="calc(100vh - 240px)"
       />
-    </FullScreenPanel>
+      </FullScreenPanel>
+      {confirmation}
+    </>
   );
 };
 

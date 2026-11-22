@@ -748,7 +748,7 @@
       "saveAndTestSuccess": "Yapılandırma kaydedildi, bağlantı tamam",
       "saveAndTestFailed": "Yapılandırma kaydedildi ancak bağlantı testi başarısız oldu: {{error}}",
       "noRemoteData": "Uzak sunucuda eşitleme verisi bulunamadı",
-      "incompatibleVersion": "Uzak veriler uyumsuz (protokol v{{protocolVersion}}, veritabanı {{dbCompatVersion}}). Bu istemci v2 / db-v6 protokolünü destekler.",
+      "incompatibleVersion": "Uzak veriler uyumsuz (protokol v{{protocolVersion}}, veritabanı {{dbCompatVersion}}). Bu istemci v3 / db-v6 protokolünü destekler.",
       "unsaved": "Kaydedilmemiş",
       "saved": "Kaydedildi",
       "unsavedChanges": "Lütfen önce yapılandırmayı kaydedin",
@@ -771,7 +771,7 @@
         "path": "Uzak yol",
         "dbCompat": "Veritabanı uyumluluğu",
         "artifacts": "İçindekiler",
-        "legacyNotice": "Eski bir uzak yol algılandı. Geri yükleme sonrasında bir sonraki yükleme yeni v2/db-v6 yoluna yazılacaktır.",
+        "legacyNotice": "Eski bir uzak yol algılandı. Geri yükleme sonrasında bir sonraki yükleme yeni v3/db-v6 yoluna yazılacaktır.",
         "warning": "Bu, tüm yerel verilerin ve beceri yapılandırmalarının üzerine yazacaktır",
         "confirm": "Geri Yüklemeyi Onayla"
       },
@@ -787,7 +787,7 @@
         "path": "Uzak yol",
         "dbCompat": "Veritabanı uyumluluğu",
         "warning": "Bu, uzak sunucudaki mevcut eşitleme verilerinin üzerine yazılacaktır",
-        "legacyNotice": "Eski uzak veriler algılandı. Bu yükleme, yeni v2/db-v6 yoluna yazacak ve eski yolun üzerine yazılmayacaktır.",
+        "legacyNotice": "Eski uzak veriler algılandı. Bu yükleme, yeni v3/db-v6 yoluna yazacak ve eski yolun üzerine yazılmayacaktır.",
         "confirm": "Yüklemeyi Onayla"
       }
     },
@@ -858,7 +858,7 @@
       "autoSyncLastErrorHint": "Lütfen ağ veya S3 ayarlarını kontrol edin. Otomatik eşitleme gelecekteki değişikliklerde yeniden denenecek.",
       "missingBucket": "Lütfen S3 bucket adını girin",
       "noRemoteData": "S3 paketinde eşitleme verisi bulunamadı",
-      "incompatibleVersion": "Uzak veriler uyumlu değil (sürüm {{version}}). Bu istemci v2 / db-v6 protokolünü destekler.",
+      "incompatibleVersion": "Uzak veriler uyumlu değil (sürüm {{version}}). Bu istemci v3 / db-v6 protokolünü destekler.",
       "unsaved": "Kaydedilmemiş",
       "saved": "Kaydedildi",
       "clear": "Yapılandırmayı temizle",

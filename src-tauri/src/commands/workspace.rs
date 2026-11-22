@@ -1,4 +1,6 @@
 use regex::Regex;
+use std::io::Read;
+use std::ops::Range;
 use std::sync::LazyLock;
 use tauri::AppHandle;
 use tauri_plugin_opener::OpenerExt;
@@ -93,11 +95,7 @@ pub async fn list_daily_memory_files() -> Result<Vec<DailyMemoryFileInfo>, Strin
             .map(|d| d.as_secs())
             .unwrap_or(0);
 
-        let preview = std::fs::read_to_string(entry.path())
-            .unwrap_or_default()
-            .chars()
-            .take(200)
-            .collect::<String>();
+        let preview = read_preview(&entry.path(), 200).unwrap_or_default();
 
         files.push(DailyMemoryFileInfo {
             filename: name,
@@ -173,6 +171,45 @@ fn ceil_char_boundary(s: &str, mut i: usize) -> usize {
     i
 }
 
+fn read_preview(path: &std::path::Path, max_chars: usize) -> std::io::Result<String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(max_chars.saturating_mul(4) as u64)
+        .read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes)
+        .chars()
+        .take(max_chars)
+        .collect())
+}
+
+/// Case conversion can expand or shrink UTF-8. Translate only the first match
+/// back to original character boundaries instead of slicing with folded offsets.
+fn original_match_range(content: &str, folded: Range<usize>) -> Range<usize> {
+    let mut folded_pos = 0;
+    let mut original_start = None;
+    for (offset, ch) in content.char_indices() {
+        let next = folded_pos + ch.to_lowercase().map(char::len_utf8).sum::<usize>();
+        if original_start.is_none() && folded.start < next {
+            original_start = Some(offset);
+        }
+        if folded.end <= next {
+            return original_start.unwrap_or(offset)..offset + ch.len_utf8();
+        }
+        folded_pos = next;
+    }
+    original_start.unwrap_or(content.len())..content.len()
+}
+
+fn memory_matches(content: &str, query_lower: &str) -> (Option<Range<usize>>, usize) {
+    let content_lower = content.to_lowercase();
+    let mut matches = content_lower.match_indices(query_lower);
+    let first = matches
+        .next()
+        .map(|(offset, matched)| original_match_range(content, offset..offset + matched.len()));
+    let count = usize::from(first.is_some()) + matches.count();
+    (first, count)
+}
+
 /// Search result for daily memory full-text search.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -218,23 +255,18 @@ pub async fn search_daily_memory_files(
 
         let date = name.trim_end_matches(".md").to_string();
         let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
-        let content_lower = content.to_lowercase();
-
-        // Count matches in content
-        let content_matches: Vec<usize> = content_lower
-            .match_indices(&query_lower)
-            .map(|(i, _)| i)
-            .collect();
+        let (first_match, match_count) = memory_matches(&content, &query_lower);
 
         // Also check date field
         let date_matches = date.to_lowercase().contains(&query_lower);
 
-        if content_matches.is_empty() && !date_matches {
+        if first_match.is_none() && !date_matches {
             continue;
         }
 
         // Build snippet around first content match (~120 chars of context)
-        let snippet = if let Some(&first_pos) = content_matches.first() {
+        let snippet = if let Some(first_match) = first_match {
+            let first_pos = first_match.start;
             let start = if first_pos > 50 {
                 floor_char_boundary(&content, first_pos - 50)
             } else {
@@ -274,7 +306,7 @@ pub async fn search_daily_memory_files(
             size_bytes,
             modified_at,
             snippet,
-            match_count: content_matches.len(),
+            match_count,
         });
     }
 
@@ -359,4 +391,36 @@ pub async fn open_workspace_directory(handle: AppHandle, subdir: String) -> Resu
         .map_err(|e| format!("Failed to open directory: {e}"))?;
 
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{memory_matches, read_preview};
+
+    #[test]
+    fn memory_matches_return_original_offsets_after_unicode_case_expansion() {
+        for prefix in ["İ".repeat(100), "K".repeat(100), "İK".repeat(100)] {
+            let content = format!("{prefix}needle NEEDLE");
+            let (first, count) = memory_matches(&content, "needle");
+            let first = first.unwrap();
+            assert_eq!(&content[first], "needle");
+            assert_eq!(count, 2);
+        }
+    }
+
+    #[test]
+    fn memory_matches_cover_the_original_character_when_case_expands() {
+        let content = "before İ after";
+        let (first, count) = memory_matches(content, "i\u{307}");
+        assert_eq!(&content[first.unwrap()], "İ");
+        assert_eq!(count, 1);
+        assert_eq!(memory_matches(content, "missing"), (None, 0));
+    }
+
+    #[test]
+    fn memory_preview_reads_only_the_requested_character_prefix() {
+        let temp = tempfile::NamedTempFile::new().unwrap();
+        std::fs::write(temp.path(), format!("{}tail", "🙂İK".repeat(300))).unwrap();
+        assert_eq!(read_preview(temp.path(), 3).unwrap(), "🙂İK");
+    }
 }

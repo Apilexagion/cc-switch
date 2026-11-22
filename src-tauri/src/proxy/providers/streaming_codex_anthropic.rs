@@ -728,12 +728,16 @@ pub(crate) fn create_responses_sse_stream_from_anthropic_with_context<
         let mut state = AnthropicToResponsesState::with_tool_context(tool_context);
         let mut stream_failed = false;
 
+        let stream = crate::proxy::sse::bounded_sse_chunks(stream);
         tokio::pin!(stream);
 
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    sse.push_bytes(&bytes);
+                    if let Err(error) = sse.push_bytes(&bytes) {
+                        yield Err(error);
+                        return;
+                    }
 
                     // A few compatible gateways ignore stream:true and return one
                     // JSON document. Hold that body intact (including pretty-printed

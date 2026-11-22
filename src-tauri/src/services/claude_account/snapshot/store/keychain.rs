@@ -2,8 +2,8 @@
 //!
 //! - 读：`find-generic-password -a <account> -s <service> -w`，输出就是凭据 JSON；
 //! - 写：`security -i` 从 stdin 读一行 `add-generic-password -U -a … -s … -X <hex>`，令牌不出现在
-//!   命令行参数里（`ps` 看不到）；一行超出 `security -i` 的缓冲时（连了 OAuth 类 MCP 服务器后
-//!   `mcpOAuth` 很容易撑大），和 Claude Code 一样改经命令行参数写；
+//!   命令行参数里（`ps` 看不到）；超出交互缓冲的凭据直接经 Security.framework 原地更新，
+//!   保留已有条目的 ACL；新条目只信任本程序和 `/usr/bin/security`；
 //! - 删：`delete-generic-password`。
 //!
 //! Claude Code 写钥匙串失败（非暂时性）时会改写槽位里的 `.credentials.json` 并删掉条目，
@@ -20,8 +20,7 @@ use crate::services::claude_account::layout;
 const SECURITY: &str = "/usr/bin/security";
 const TIMEOUT: Duration = Duration::from_secs(5);
 /// `security -i` 一行的上限（它按 4096 字节的缓冲读行，超出的部分会被当成下一条命令）。
-/// 超过时和 Claude Code 一样改走命令行参数：令牌会短暂出现在进程列表里，但这一条 Claude Code
-/// 自己每次刷新令牌也是这么写的，拒绝写入只会让切换失败（#9002）。
+/// 更大的凭据必须改经系统 API 写入，不能退回会泄露凭据的命令行参数。
 const MAX_LINE: usize = 4032;
 /// 没有这个条目
 const EXIT_NOT_FOUND: i32 = 44;
@@ -65,23 +64,22 @@ impl CredentialStore for KeychainStore {
     }
 
     fn write(&self, slot: &Slot, secret: &Secret) -> Result<(), AppError> {
-        let hex = hex_encode(&secret.to_bytes());
-        let output = match add_invocation(
-            &layout::keychain_account(),
-            &slot.keychain_service(),
-            &hex,
-        ) {
-            AddInvocation::Stdin(line) => {
-                run(Command::new(SECURITY).arg("-i"), Some(line.as_bytes()))?
-            }
-            AddInvocation::Args(args) => {
-                log::warn!(
-                    "[ClaudeAccount] 登录信息超出 security -i 缓冲（{} 字节），改经命令行参数写入钥匙串",
-                    hex.len() / 2
-                );
-                run(Command::new(SECURITY).args(&args), None)?
-            }
-        };
+        let bytes = secret.to_bytes();
+        let hex = hex_encode(&bytes);
+        let output =
+            match add_invocation(&layout::keychain_account(), &slot.keychain_service(), &hex) {
+                AddInvocation::Stdin(line) => {
+                    run(Command::new(SECURITY).arg("-i"), Some(line.as_bytes()))?
+                }
+                AddInvocation::Native => {
+                    crate::macos_keychain::write_generic_password(
+                        &slot.keychain_service(),
+                        &layout::keychain_account(),
+                        &bytes,
+                    )?;
+                    return FileStore.delete(slot);
+                }
+            };
         match output.code {
             0 => FileStore.delete(slot),
             EXIT_LOCKED => Err(locked()),
@@ -108,12 +106,12 @@ impl CredentialStore for KeychainStore {
     }
 }
 
-/// 写一条 `add-generic-password` 的方式：放得进 `security -i` 一行就经 stdin，否则经命令行参数。
-/// 里面有凭据的 hex，只在测试里能打印。
+/// 放得进 `security -i` 一行就经 stdin，否则直接调用系统 API。
+/// 原生分支只有一个标记，不构造包含凭据的 argv。
 #[cfg_attr(test, derive(Debug, PartialEq))]
 enum AddInvocation {
     Stdin(String),
-    Args(Vec<String>),
+    Native,
 }
 
 fn add_invocation(account: &str, service: &str, hex: &str) -> AddInvocation {
@@ -121,20 +119,7 @@ fn add_invocation(account: &str, service: &str, hex: &str) -> AddInvocation {
     if line.len() <= MAX_LINE {
         return AddInvocation::Stdin(line);
     }
-    AddInvocation::Args(
-        [
-            "add-generic-password",
-            "-U",
-            "-a",
-            account,
-            "-s",
-            service,
-            "-X",
-            hex,
-        ]
-        .map(String::from)
-        .to_vec(),
-    )
+    AddInvocation::Native
 }
 
 struct Output {
@@ -243,28 +228,14 @@ mod tests {
         }
     }
 
-    /// #9002：连了 OAuth 类 MCP 服务器后凭据 JSON 有 3 KB 左右，hex 后超出 `security -i` 一行，
-    /// 要和 Claude Code 一样改经命令行参数写，而不是拒绝切换。
+    /// OAuth MCP 凭据可轻易超过交互行上限；该分支不能再创建携带秘密的 argv。
     #[test]
-    fn large_payload_falls_back_to_args() {
+    fn large_payload_uses_native_api_without_secret_arguments() {
         let json = format!(r#"{{"mcpOAuth":{{"t":"{}"}}}}"#, "x".repeat(3100));
         let hex = hex_encode(json.as_bytes());
         assert_eq!(
             add_invocation("me", "Claude Code-credentials", &hex),
-            AddInvocation::Args(
-                [
-                    "add-generic-password",
-                    "-U",
-                    "-a",
-                    "me",
-                    "-s",
-                    "Claude Code-credentials",
-                    "-X",
-                    &hex,
-                ]
-                .map(String::from)
-                .to_vec()
-            )
+            AddInvocation::Native
         );
     }
 }

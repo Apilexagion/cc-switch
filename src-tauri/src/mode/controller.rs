@@ -1383,7 +1383,7 @@ pub async fn set_stack_member(
     })
 }
 
-async fn set_stack_member_locked(
+pub(crate) async fn set_stack_member_locked(
     state: &AppState,
     app: &AppType,
     provider_id: &str,

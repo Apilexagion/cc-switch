@@ -870,17 +870,33 @@ pub fn create_responses_sse_stream_from_chat_with_context<E: std::error::Error +
     stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
     tool_context: CodexToolContext,
 ) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
+    create_responses_sse_stream_from_chat_with_limit(
+        stream,
+        tool_context,
+        crate::proxy::sse::MAX_SSE_EVENT_BYTES,
+    )
+}
+
+fn create_responses_sse_stream_from_chat_with_limit<E: std::error::Error + Send + 'static>(
+    stream: impl Stream<Item = Result<Bytes, E>> + Send + 'static,
+    tool_context: CodexToolContext,
+    max_event_bytes: usize,
+) -> impl Stream<Item = Result<Bytes, std::io::Error>> + Send {
     sse::stream_with_message_phases(async_stream::stream! {
-        let mut sse = SseBuffer::new();
+        let mut sse = SseBuffer::with_limit(max_event_bytes);
         let mut state = ChatToResponsesState::with_tool_context(tool_context);
         let mut stream_failed = false;
 
+        let stream = crate::proxy::sse::bounded_sse_chunks(stream);
         tokio::pin!(stream);
 
         while let Some(chunk) = stream.next().await {
             match chunk {
                 Ok(bytes) => {
-                    sse.push_bytes(&bytes);
+                    if let Err(error) = sse.push_bytes(&bytes) {
+                        yield Err(error);
+                        return;
+                    }
 
                     while let Some(block) = sse.next_block() {
                         if block.trim().is_empty() {
@@ -990,6 +1006,27 @@ pub(crate) fn build_responses_sse_from_chat_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn oversized_upstream_event_fails_conversion_instead_of_finalizing_success() {
+        let upstream = futures::stream::iter([
+            Ok::<_, std::io::Error>(Bytes::from_static(b"data: {\"choices\":")),
+            Ok(Bytes::from_static(b"[not-an-ending")),
+        ]);
+        let converted = create_responses_sse_stream_from_chat_with_limit(
+            upstream,
+            CodexToolContext::default(),
+            24,
+        );
+        let results = converted.collect::<Vec<_>>().await;
+        assert!(results.iter().any(Result::is_err));
+        let output = results
+            .into_iter()
+            .filter_map(Result::ok)
+            .flat_map(|bytes| bytes.to_vec())
+            .collect::<Vec<_>>();
+        assert!(!String::from_utf8_lossy(&output).contains("response.completed"));
+    }
     use futures::{stream, StreamExt};
 
     async fn collect(chunks: Vec<&str>) -> String {

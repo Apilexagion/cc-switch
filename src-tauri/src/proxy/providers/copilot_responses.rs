@@ -124,11 +124,12 @@ where
     async_stream::try_stream! {
         let mut sse = SseBuffer::new();
         let mut ids = ItemIds::default();
+        let stream = crate::proxy::sse::bounded_sse_chunks(stream);
         tokio::pin!(stream);
 
         while let Some(chunk) = stream.next().await {
             let bytes = chunk.map_err(|error| io::Error::other(error.to_string()))?;
-            sse.push_bytes(&bytes);
+            sse.push_bytes(&bytes)?;
             while let Some(block) = sse.next_block() {
                 if !block.trim().is_empty() {
                     yield ids.rewrite_block(block)?;

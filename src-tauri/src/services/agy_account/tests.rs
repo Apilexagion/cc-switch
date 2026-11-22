@@ -64,11 +64,47 @@ fn manager() -> (tempfile::TempDir, Arc<MemoryLogin>, AgyAccountManager) {
 }
 
 async fn add(manager: &AgyAccountManager, sub: &str) {
-    let mut store = manager.store.lock().await;
+    let mut store = manager.lock_store().await.unwrap();
     let credential = credential(sub, "fresh");
     let claims = oauth::identity(credential["id_token"].as_str().unwrap()).unwrap();
     upsert(&mut store, credential, &claims);
     manager.persist(&store).unwrap();
+}
+
+#[tokio::test]
+async fn malformed_account_store_blocks_updates_and_can_be_repaired_in_place() {
+    let (dir, login, manager) = manager();
+    let path = dir.path().join(STORE_FILENAME);
+    let damaged = b"{\"version\":1,\"accounts\":";
+    std::fs::write(&path, damaged).unwrap();
+    set_live(&login, &credential("current", "placeholder-access"));
+    assert!(manager.status().await.is_err());
+    assert!(manager.remove_all().await.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), damaged);
+    assert_eq!(*login.writes.lock().unwrap(), 0);
+    std::fs::write(&path, serde_json::to_vec(&StoreFile::default()).unwrap()).unwrap();
+    add(&manager, "saved").await;
+    assert!(load_store(dir.path())
+        .unwrap()
+        .accounts
+        .contains_key("saved"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn unreadable_account_store_cannot_be_replaced_by_current_login() {
+    use std::os::unix::fs::PermissionsExt;
+    let (dir, login, manager) = manager();
+    add(&manager, "saved").await;
+    let path = dir.path().join(STORE_FILENAME);
+    let original = std::fs::read(&path).unwrap();
+    let permissions = std::fs::metadata(&path).unwrap().permissions();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0)).unwrap();
+    set_live(&login, &credential("current", "placeholder-access"));
+    let result = manager.status().await;
+    std::fs::set_permissions(&path, permissions).unwrap();
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), original);
 }
 
 // 以下测试只在支持切号的平台上有意义。
@@ -139,7 +175,7 @@ mod switching {
         // agy 续期后把新的 access token 写回钥匙串
         set_live(&login, &credential("alice", "renewed"));
         manager.switch_to("bob").await.unwrap();
-        let store = manager.store.lock().await;
+        let store = manager.lock_store().await.unwrap();
         assert_eq!(
             store.accounts["alice"].credential["token"]["access_token"],
             "renewed"
@@ -288,7 +324,7 @@ mod switching {
         live["id_token_email"] = json!("Alice@Example.com");
         set_live(&login, &live);
         assert_eq!(manager.live_account_id().await.as_deref(), Some("alice"));
-        let store = manager.store.lock().await;
+        let store = manager.lock_store().await.unwrap();
         assert_eq!(
             store.accounts["alice"].credential["token"]["refresh_token"],
             "another-refresh"
@@ -340,7 +376,7 @@ mod switching {
         let (_dir, login, manager) = manager();
         // 模拟旧版删过的账号：只有 dismissed 里的 sub，没有 dismissed_emails
         {
-            let mut store = manager.store.lock().await;
+            let mut store = manager.lock_store().await.unwrap();
             store.dismissed.push("alice".into());
             manager.persist(&store).unwrap();
         }
@@ -350,7 +386,7 @@ mod switching {
         assert_eq!(status.current_account_id, None);
         assert!(status.accounts.is_empty());
         {
-            let store = manager.store.lock().await;
+            let store = manager.lock_store().await.unwrap();
             assert_eq!(
                 store.dismissed_emails.get("alice").map(String::as_str),
                 Some("alice@example.com")
@@ -370,7 +406,7 @@ mod switching {
         // 钥匙串里还是过期的旧令牌，CC Switch 查额度时已经续期并存在自己的副本里
         set_live(&login, &agy15_credential("alice", "expired-in-keychain"));
         {
-            let mut store = manager.store.lock().await;
+            let mut store = manager.lock_store().await.unwrap();
             let cred = &mut store.accounts.get_mut("alice").unwrap().credential;
             cred["token"]["access_token"] = json!("refreshed-by-cc-switch");
             cred["token"]["expiry"] = json!(in_an_hour());
