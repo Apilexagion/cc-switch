@@ -156,7 +156,7 @@ async fn serve_proxy_connection(
         result = &mut connection => result,
     };
     if let Err(error) = result {
-        log::debug!("[ProxyServer] connection ended: {error}");
+        log::debug!("[{}] connection ended: {error}", log_srv::CONN_ERR);
     }
 }
 
@@ -295,7 +295,7 @@ impl ProxyServer {
                         let (stream, remote_addr) = match result {
                             Ok(value) => value,
                             Err(error) => {
-                                log::error!("[ProxyServer] accept failed: {error}");
+                                log::error!("[{}] accept failed: {error}", log_srv::ACCEPT_ERR);
                                 tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                                 continue;
                             }

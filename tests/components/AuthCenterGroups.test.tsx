@@ -244,8 +244,9 @@ describe("subscriptionQuotaState", () => {
     opts?.defaultValue ?? key) as unknown as TFunction;
 
   it("writes remaining quota per tier and flags a failed query", async () => {
-    const { subscriptionQuotaState } =
-      await import("@/components/settings/auth/AccountQuota");
+    const { subscriptionQuotaState } = await import(
+      "@/components/settings/auth/AccountQuota"
+    );
     const ok = subscriptionQuotaState(
       t,
       {
@@ -298,8 +299,9 @@ describe("subscriptionQuotaState", () => {
 describe("AccountQuotaColumn", () => {
   it("opens the saved resets to list when each one expires", async () => {
     const user = userEvent.setup();
-    const { AccountQuotaColumn } =
-      await import("@/components/settings/auth/AccountQuota");
+    const { AccountQuotaColumn } = await import(
+      "@/components/settings/auth/AccountQuota"
+    );
     render(
       <AccountQuotaColumn
         login="me@example.com"

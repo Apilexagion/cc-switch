@@ -90,23 +90,23 @@ const WorkspaceFileEditor: React.FC<WorkspaceFileEditorProps> = ({
   return (
     <>
       <FullScreenPanel
-      // Keep the file list visible until the editor content is ready.
-      isOpen={isOpen && loadedFile === activeFilename}
-      title={t("workspace.editing", { filename: activeFilename })}
-      onClose={() => requestLeave(onClose)}
-      footer={
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? t("common.saving") : t("common.save")}
-        </Button>
-      }
-    >
-      <MarkdownEditor
-        value={content}
-        onChange={setContent}
-        darkMode={isDarkMode}
-        placeholder={`# ${activeFilename}\n\n...`}
-        minHeight="calc(100vh - 240px)"
-      />
+        // Keep the file list visible until the editor content is ready.
+        isOpen={isOpen && loadedFile === activeFilename}
+        title={t("workspace.editing", { filename: activeFilename })}
+        onClose={() => requestLeave(onClose)}
+        footer={
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? t("common.saving") : t("common.save")}
+          </Button>
+        }
+      >
+        <MarkdownEditor
+          value={content}
+          onChange={setContent}
+          darkMode={isDarkMode}
+          placeholder={`# ${activeFilename}\n\n...`}
+          minHeight="calc(100vh - 240px)"
+        />
       </FullScreenPanel>
       {confirmation}
     </>

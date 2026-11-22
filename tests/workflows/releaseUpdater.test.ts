@@ -57,7 +57,9 @@ describe("fork updater release routing", () => {
       /pub async fn open_portable_update_download\b[\s\S]*?\n\}/,
     )?.[0];
     expect(zipUrl).toContain(`${forkReleases}/download/v{version}/`);
-    expect(zipUrl).toContain("CC-Switch-v{version}-Windows{suffix}-Portable.zip");
+    expect(zipUrl).toContain(
+      "CC-Switch-v{version}-Windows{suffix}-Portable.zip",
+    );
     expect(command).toContain(`${forkReleases}/latest`);
     expect(zipUrl).not.toContain("farion1231/cc-switch");
     expect(command).not.toContain("farion1231/cc-switch");
@@ -76,9 +78,7 @@ describe("fork updater release routing", () => {
     const plugin = readRepoFile("src-tauri/src/app_updater.rs");
     expect(plugin).toContain(".default_version_comparator(");
     const appUpdate = readRepoFile("src-tauri/src/app_update.rs");
-    const builder = appUpdate.match(
-      /pub fn build_updater\b[\s\S]*?\n\}/,
-    )?.[0];
+    const builder = appUpdate.match(/pub fn build_updater\b[\s\S]*?\n\}/)?.[0];
     expect(builder).toContain(".updater_builder()");
     expect(builder).toContain(".version_comparator(");
     expect(builder).toContain("crate::app_updater::is_newer");

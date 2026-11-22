@@ -2,32 +2,32 @@
   "version": "4.0.38",
   "items": [
     {
-      "type": "new",
-      "zh": "一键导入链接支持 WorkBuddy",
-      "zh-TW": "一鍵匯入連結支援 WorkBuddy",
-      "en": "Provider deep links can now import WorkBuddy providers",
-      "ja": "インポートリンクが WorkBuddy のプロバイダーに対応"
+      "type": "fix",
+      "zh": "修复账号表覆盖、使用中供应商删除与代理连接边界",
+      "zh-TW": "修正帳號表覆蓋、使用中供應商刪除與代理連線邊界",
+      "en": "Protect account data, active providers and proxy connections",
+      "ja": "アカウントデータ、使用中のプロバイダーとプロキシ接続を保護"
+    },
+    {
+      "type": "fix",
+      "zh": "云同步使用完整快照；保留旧备份恢复，同步客户端请一并升级",
+      "zh-TW": "雲同步使用完整快照；保留舊備份還原，同步客戶端請一併升級",
+      "en": "Sync uses complete snapshots and restores old backups; upgrade all syncing clients",
+      "ja": "クラウド同期を完全なスナップショットに変更。旧バックアップも復元可能。同期端末は同時に更新"
+    },
+    {
+      "type": "fix",
+      "zh": "修复缓存配额与账号选择；编辑草稿离开前提示保存",
+      "zh-TW": "修正快取配額與帳號選擇；編輯草稿離開前提示儲存",
+      "en": "Fix cached-token quotas and account selection; confirm before discarding drafts",
+      "ja": "キャッシュ使用量とアカウント選択を修正。未保存の編集を閉じる前に確認"
     },
     {
       "type": "improve",
-      "zh": "Antigravity：Linux 可切换账号，会话列表去掉空会话",
-      "zh-TW": "Antigravity：Linux 可切換帳號，工作階段列表去掉空工作階段",
-      "en": "Antigravity: account switching on Linux, and no more empty sessions in the list",
-      "ja": "Antigravity：Linux でアカウント切り替えに対応、空セッションを一覧から除外"
-    },
-    {
-      "type": "fix",
-      "zh": "修复 DeepSeek Harness 的第三方供应商突然全部消失",
-      "zh-TW": "修正 DeepSeek Harness 的第三方供應商突然全部消失",
-      "en": "Third-party providers no longer vanish from DeepSeek Harness",
-      "ja": "DeepSeek Harness からサードパーティのプロバイダーが消える問題を修正"
-    },
-    {
-      "type": "fix",
-      "zh": "修复用量重复计算，以及主界面变成白条",
-      "zh-TW": "修正用量重複計算，以及主介面變成白條",
-      "en": "Usage is no longer double-counted, and the main window no longer opens as a thin strip",
-      "ja": "使用量の二重計上と、メイン画面が細い帯になる問題を修正"
+      "zh": "合入上游 4.0.38：WorkBuddy 导入与 Linux 账号切换",
+      "zh-TW": "合入上游 4.0.38：WorkBuddy 匯入與 Linux 帳號切換",
+      "en": "Merge upstream 4.0.38: WorkBuddy import and Antigravity account switching on Linux",
+      "ja": "上流 4.0.38 を統合：WorkBuddy のインポートと Linux でのアカウント切り替え"
     }
   ]
 }

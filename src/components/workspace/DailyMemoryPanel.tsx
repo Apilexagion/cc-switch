@@ -158,10 +158,13 @@ const DailyMemoryPanel: React.FC<DailyMemoryPanelProps> = ({
     }
   }, []);
 
-  useEffect(() => () => {
-    ++searchRequestRef.current;
-    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      ++searchRequestRef.current;
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    },
+    [],
+  );
 
   // Keyboard shortcut: Cmd/Ctrl+F to open search, Escape to close
   useEffect(() => {

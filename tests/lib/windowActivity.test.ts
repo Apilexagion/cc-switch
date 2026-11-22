@@ -51,8 +51,9 @@ describe("window activity", () => {
       return native.offVisibility;
     });
     ({ focusManager } = await import("@tanstack/react-query"));
-    ({ initializeWindowActivity: initialize } =
-      await import("@/lib/windowActivity"));
+    ({ initializeWindowActivity: initialize } = await import(
+      "@/lib/windowActivity"
+    ));
   });
 
   afterEach(() => {
@@ -225,8 +226,9 @@ describe("window activity", () => {
   });
 
   it("keeps real Query polling on blur and pauses it only while hidden", async () => {
-    const { QueryClient, QueryObserver } =
-      await import("@tanstack/react-query");
+    const { QueryClient, QueryObserver } = await import(
+      "@tanstack/react-query"
+    );
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });

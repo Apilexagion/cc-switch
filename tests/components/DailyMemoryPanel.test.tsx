@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DailyMemoryPanel from "@/components/workspace/DailyMemoryPanel";
 import { workspaceApi } from "@/lib/api/workspace";
@@ -13,8 +19,18 @@ vi.mock("@/lib/api/workspace", () => ({
   },
 }));
 vi.mock("@/components/MarkdownEditor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
-    <textarea aria-label="Content" value={value} onChange={(event) => onChange(event.target.value)} />
+  default: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+  }) => (
+    <textarea
+      aria-label="Content"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
   ),
 }));
 
@@ -129,20 +145,25 @@ describe("DailyMemoryPanel opening", () => {
   });
 });
 
-
 describe("DailyMemoryPanel draft protection", () => {
   it("keeps the note when back is cancelled and discards only after confirmation", async () => {
-    vi.mocked(workspaceApi.readDailyMemoryFile).mockResolvedValueOnce("saved note");
+    vi.mocked(workspaceApi.readDailyMemoryFile).mockResolvedValueOnce(
+      "saved note",
+    );
     render(<DailyMemoryPanel isOpen onClose={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: /First note/ }));
     const editor = await screen.findByRole("textbox");
     fireEvent.change(editor, { target: { value: "unsaved note" } });
     await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
     fireEvent.keyDown(window, { key: "Escape" });
-    fireEvent.click(await screen.findByRole("button", { name: "common.unsavedLeaveCancel" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "common.unsavedLeaveCancel" }),
+    );
     expect(editor).toHaveValue("unsaved note");
     fireEvent.keyDown(window, { key: "Escape" });
-    fireEvent.click(await screen.findByRole("button", { name: "common.unsavedLeaveConfirm" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "common.unsavedLeaveConfirm" }),
+    );
     await waitFor(() => expect(screen.queryByRole("textbox")).toBeNull());
     expect(hasUnsavedChanges()).toBe(false);
   });

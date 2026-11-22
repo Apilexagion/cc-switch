@@ -12,12 +12,12 @@ describe("modelAliases utils", () => {
       "codex-auto-review": "gpt-5.6-sol",
       "claude-fable-5": "special-model",
     });
-    expect(entries.map((e) => ({ source: e.source, target: e.target }))).toEqual(
-      [
-        { source: "codex-auto-review", target: "gpt-5.6-sol" },
-        { source: "claude-fable-5", target: "special-model" },
-      ],
-    );
+    expect(
+      entries.map((e) => ({ source: e.source, target: e.target })),
+    ).toEqual([
+      { source: "codex-auto-review", target: "gpt-5.6-sol" },
+      { source: "claude-fable-5", target: "special-model" },
+    ]);
     // 每条都有稳定 id 供列表渲染
     expect(entries.every((e) => typeof e.id === "string" && e.id)).toBe(true);
   });
@@ -41,7 +41,10 @@ describe("modelAliases utils", () => {
   it("serializes entries back to an object, trimming and dropping blanks", () => {
     expect(
       serializeModelAliases([
-        createModelAliasEntry({ source: " codex-auto-review ", target: " gpt-5.6-sol " }),
+        createModelAliasEntry({
+          source: " codex-auto-review ",
+          target: " gpt-5.6-sol ",
+        }),
         createModelAliasEntry({ source: "", target: "no-source" }),
         createModelAliasEntry({ source: "no-target", target: "  " }),
       ]),
@@ -60,7 +63,9 @@ describe("modelAliases utils", () => {
   it("returns undefined when nothing valid remains (so the field is not written)", () => {
     expect(serializeModelAliases([])).toBeUndefined();
     expect(
-      serializeModelAliases([createModelAliasEntry({ source: "", target: "" })]),
+      serializeModelAliases([
+        createModelAliasEntry({ source: "", target: "" }),
+      ]),
     ).toBeUndefined();
   });
 

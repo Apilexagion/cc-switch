@@ -987,8 +987,11 @@ function ProviderFormFull({
         : "",
     );
 
-  const { configError: codexConfigError, debouncedValidate, validateToml } =
-    useCodexTomlValidation();
+  const {
+    configError: codexConfigError,
+    debouncedValidate,
+    validateToml,
+  } = useCodexTomlValidation();
 
   const handleCodexConfigChange = useCallback(
     (value: string) => {
@@ -1474,14 +1477,16 @@ function ProviderFormFull({
     (appId === "claude" || appId === "codex") && category !== "official";
 
   const validateJsonDraft = () => {
-    const codexNeedsAuth = appId === "codex" &&
-      !isCodexOfficialManagedOauthBound && !wasCodexOfficialManagedOauthBound;
+    const codexNeedsAuth =
+      appId === "codex" &&
+      !isCodexOfficialManagedOauthBound &&
+      !wasCodexOfficialManagedOauthBound;
     if (!codexNeedsAuth && !usesGeminiStyleForm(appId)) return true;
     try {
       parseProviderJsonObject(codexNeedsAuth ? codexAuth : geminiConfig);
       return true;
     } catch {
-      toast.error(t("common.invalidJson"));
+      toast.error(t("jsonEditor.invalidJson"));
       return false;
     }
   };
@@ -1997,7 +2002,7 @@ function ProviderFormFull({
         }
         settingsConfig = JSON.stringify(configObj);
       } catch {
-        toast.error(t("common.invalidJson"));
+        toast.error(t("jsonEditor.invalidJson"));
         return;
       }
     } else if (usesGeminiStyleForm(appId)) {
@@ -2010,7 +2015,7 @@ function ProviderFormFull({
         };
         settingsConfig = JSON.stringify(combined);
       } catch {
-        toast.error(t("common.invalidJson"));
+        toast.error(t("jsonEditor.invalidJson"));
         return;
       }
     } else if (

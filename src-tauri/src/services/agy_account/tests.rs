@@ -225,14 +225,11 @@ mod switching {
     async fn accounts_needing_reauth_cannot_be_switched_to() {
         let (_dir, _login, manager) = manager();
         add(&manager, "bob").await;
-        manager
-            .store
-            .lock()
-            .await
-            .accounts
-            .get_mut("bob")
-            .unwrap()
-            .requires_reauth = true;
+        {
+            let mut store = manager.lock_store().await.unwrap();
+            store.accounts.get_mut("bob").unwrap().requires_reauth = true;
+            manager.persist(&store).unwrap();
+        }
         assert!(manager.switch_to("bob").await.is_err());
     }
 
@@ -483,14 +480,11 @@ fn in_an_hour() -> String {
 async fn quota_token_comes_from_the_stored_copy_while_fresh() {
     let (_dir, _login, manager) = manager();
     add(&manager, "bob").await;
-    manager
-        .store
-        .lock()
-        .await
-        .accounts
-        .get_mut("bob")
-        .unwrap()
-        .credential["token"]["expiry"] = json!(in_an_hour());
+    {
+        let mut store = manager.lock_store().await.unwrap();
+        store.accounts.get_mut("bob").unwrap().credential["token"]["expiry"] = json!(in_an_hour());
+        manager.persist(&store).unwrap();
+    }
     assert_eq!(manager.access_token("bob").await.unwrap(), "fresh");
 }
 
@@ -502,14 +496,11 @@ async fn quota_token_is_refused_for_unknown_or_expired_accounts() {
         Err(AccountQuotaError::NotFound)
     ));
     add(&manager, "bob").await;
-    manager
-        .store
-        .lock()
-        .await
-        .accounts
-        .get_mut("bob")
-        .unwrap()
-        .requires_reauth = true;
+    {
+        let mut store = manager.lock_store().await.unwrap();
+        store.accounts.get_mut("bob").unwrap().requires_reauth = true;
+        manager.persist(&store).unwrap();
+    }
     assert!(matches!(
         manager.access_token("bob").await,
         Err(AccountQuotaError::NeedsReauth)

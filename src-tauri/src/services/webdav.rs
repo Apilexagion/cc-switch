@@ -330,34 +330,6 @@ pub async fn get_bytes(
     Ok(Some((bytes, etag)))
 }
 
-/// HEAD request to retrieve the ETag. Returns `None` on 404.
-pub async fn head_etag(url: &str, auth: &WebDavAuth) -> Result<Option<String>, AppError> {
-    let client = http_client::get();
-    let resp = apply_auth(
-        client
-            .head(url)
-            .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS)),
-        auth,
-    )
-    .send()
-    .await
-    .map_err(|e| {
-        webdav_transport_error("webdav.head_failed", "HEAD 请求", "HEAD request", url, e)
-    })?;
-
-    if resp.status() == StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if !resp.status().is_success() {
-        return Err(webdav_status_error("HEAD", resp.status(), url));
-    }
-    Ok(resp
-        .headers()
-        .get("etag")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string()))
-}
-
 // ─── Internal helpers ────────────────────────────────────────
 
 /// PROPFIND Depth=0 to check if a remote resource exists.

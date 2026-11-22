@@ -538,53 +538,6 @@ pub(crate) async fn get_object(
     Ok(Some((bytes, etag)))
 }
 
-/// Retrieve the ETag of an S3 object via HEAD. Returns `None` on 404.
-pub(crate) async fn head_object(
-    creds: &S3Credentials,
-    key: &str,
-) -> Result<Option<String>, AppError> {
-    let url_str = build_object_url(creds, key);
-    let url = Url::parse(&url_str).map_err(|e| {
-        AppError::localized(
-            "s3.url.invalid",
-            format!("S3 URL 无效: {e}"),
-            format!("Invalid S3 URL: {e}"),
-        )
-    })?;
-
-    let client = http_client::get();
-    let body_hash = sha256_hex(b"");
-    let mut headers = reqwest::header::HeaderMap::new();
-    sign_request(
-        "HEAD",
-        &url,
-        &mut headers,
-        &body_hash,
-        creds,
-        chrono::Utc::now(),
-    );
-
-    let resp = client
-        .head(url.as_str())
-        .headers(headers)
-        .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
-        .send()
-        .await
-        .map_err(|e| s3_transport_error("s3.head_failed", "HEAD 请求", "HEAD request", e))?;
-
-    if resp.status() == StatusCode::NOT_FOUND {
-        return Ok(None);
-    }
-    if !resp.status().is_success() {
-        return Err(s3_status_error("HEAD", resp.status(), &url_str));
-    }
-    Ok(resp
-        .headers()
-        .get("etag")
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string()))
-}
-
 // ─── Tests ───────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1084,7 +1037,7 @@ mod integration_tests {
 
     #[tokio::test]
     #[ignore]
-    async fn live_s3_put_get_head_roundtrip() {
+    async fn live_s3_put_get_roundtrip() {
         crate::proxy::http_client::init(None).ok();
         let creds = test_creds();
         let key = "cc-switch-sync/v2/default/_integration_test.json";
@@ -1100,13 +1053,8 @@ mod integration_tests {
         assert!(r.is_ok(), "GET failed: {:?}", r.err());
         let (body, etag) = r.unwrap().expect("should exist");
         assert_eq!(body, data);
+        assert!(etag.is_some());
         println!("PASS: get_object {} bytes, etag={:?}", body.len(), etag);
-
-        // HEAD
-        let r = head_object(&creds, key).await;
-        assert!(r.is_ok(), "HEAD failed: {:?}", r.err());
-        assert!(r.unwrap().is_some());
-        println!("PASS: head_object OK");
 
         // 404
         let r = get_object(&creds, "cc-switch-sync/_no_such_key", 1024).await;

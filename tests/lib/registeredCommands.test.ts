@@ -9,8 +9,8 @@ function registeredCommands(): string[] {
   const lib = readFileSync(path.join(ROOT, "src-tauri/src/lib.rs"), "utf8");
   const handler = lib.match(/generate_handler!\[([\s\S]*?)\]\)/);
   if (!handler) throw new Error("generate_handler! not found in lib.rs");
-  return [...handler[1].matchAll(/^\s*([\w:]+),?\s*$/gm)].map((m) =>
-    m[1].split("::").pop()!,
+  return [...handler[1].matchAll(/^\s*([\w:]+),?\s*$/gm)].map(
+    (m) => m[1].split("::").pop()!,
   );
 }
 

@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import WorkspaceFileEditor from "@/components/workspace/WorkspaceFileEditor";
 import { workspaceApi } from "@/lib/api/workspace";
@@ -8,8 +14,18 @@ vi.mock("@/lib/api/workspace", () => ({
   workspaceApi: { readFile: vi.fn(), writeFile: vi.fn() },
 }));
 vi.mock("@/components/MarkdownEditor", () => ({
-  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
-    <textarea aria-label="Content" value={value} onChange={(event) => onChange(event.target.value)} />
+  default: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+  }) => (
+    <textarea
+      aria-label="Content"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
   ),
 }));
 
@@ -73,7 +89,6 @@ describe("WorkspaceFileEditor opening", () => {
   });
 });
 
-
 describe("WorkspaceFileEditor draft protection", () => {
   it("registers edits, preserves a cancelled leave, and clears dirty after save", async () => {
     vi.mocked(workspaceApi.readFile).mockResolvedValueOnce("saved");
@@ -85,10 +100,14 @@ describe("WorkspaceFileEditor draft protection", () => {
     await waitFor(() => expect(hasUnsavedChanges()).toBe(true));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(close).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole("button", { name: "common.unsavedLeaveCancel" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "common.unsavedLeaveCancel" }),
+    );
     expect(editor).toHaveValue("draft");
     fireEvent.click(screen.getByRole("button", { name: "common.save" }));
-    await waitFor(() => expect(workspaceApi.writeFile).toHaveBeenCalledWith("AGENTS.md", "draft"));
+    await waitFor(() =>
+      expect(workspaceApi.writeFile).toHaveBeenCalledWith("AGENTS.md", "draft"),
+    );
     await waitFor(() => expect(hasUnsavedChanges()).toBe(false));
     fireEvent.keyDown(window, { key: "Escape" });
     expect(close).toHaveBeenCalledOnce();

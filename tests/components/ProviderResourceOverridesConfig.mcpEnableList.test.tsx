@@ -33,7 +33,9 @@ function renderPanel(
 ) {
   return render(
     <QueryClientProvider
-      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+      client={
+        new QueryClient({ defaultOptions: { queries: { retry: false } } })
+      }
     >
       <ProviderResourceOverridesConfig
         appId={appId}
@@ -152,7 +154,9 @@ describe("ProviderResourceOverridesConfig 供应商级 MCP 启用名单", () => 
   });
 
   it("关闭覆盖时隐藏全部 MCP 名单", async () => {
-    renderPanel({ mcp: { enabled: false, enabledServerIds: ["globally-off"] } });
+    renderPanel({
+      mcp: { enabled: false, enabledServerIds: ["globally-off"] },
+    });
     await waitFor(() => expect(mcpApi.getAllServers).toHaveBeenCalled());
     expect(screen.queryByText("全局已关闭 2 项")).not.toBeInTheDocument();
     expect(screen.queryByText("globally-off")).not.toBeInTheDocument();
@@ -183,7 +187,9 @@ describe("ProviderResourceOverridesConfig 供应商级 MCP 启用名单", () => 
   ])("%s 不显示不会生效的供应商启用入口", async (appId) => {
     renderPanel({ mcp: { enabled: true } }, vi.fn(), appId);
     await waitFor(() => expect(mcpApi.getAllServers).toHaveBeenCalled());
-    expect(screen.queryByText("勾选表示只为此供应商启用")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("勾选表示只为此供应商启用"),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText("all-off")).not.toBeInTheDocument();
   });
 });

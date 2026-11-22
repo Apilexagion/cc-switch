@@ -382,7 +382,10 @@ describe("SessionManagerPage", () => {
       ];
       setSessionFixtures(treeSessions, {
         [`${providerId}:/mock/tree/worker.jsonl`]: [
-          { role: "user", content: "bodyneedle is only in this child transcript" },
+          {
+            role: "user",
+            content: "bodyneedle is only in this child transcript",
+          },
         ],
       });
       renderPage(providerId);
@@ -434,8 +437,14 @@ describe("SessionManagerPage", () => {
       fireEvent.change(screen.getByRole("textbox", { name: "搜索会话" }), {
         target: { value: "bodyneedle" },
       });
-      expect(await screen.findByText(/^正文：/)).toHaveTextContent("bodyneedle");
-      for (const title of ["Parent Session", "Worker Session", "Nested Session"]) {
+      expect(await screen.findByText(/^正文：/)).toHaveTextContent(
+        "bodyneedle",
+      );
+      for (const title of [
+        "Parent Session",
+        "Worker Session",
+        "Nested Session",
+      ]) {
         expect(screen.getByRole("button", { name: title })).toBeInTheDocument();
       }
       expect(

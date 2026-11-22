@@ -33,8 +33,18 @@ describe("countRepoSkills", () => {
     expect(countRepoSkills(skills, repo("main"))).toBe(1);
     expect(countRepoSkills(skills, { ...repo("HEAD"), repoUrl })).toBe(1);
     expect(countRepoSkills(skills, { ...repo("main"), repoUrl })).toBe(0);
-    expect(countRepoSkills([{ ...skill("main"), repoUrl }], { ...repo("dev"), repoUrl })).toBe(0);
-    expect(countRepoSkills(skills, { ...repo("HEAD"), repoUrl: "https://git.example/o/r" })).toBe(0);
+    expect(
+      countRepoSkills([{ ...skill("main"), repoUrl }], {
+        ...repo("dev"),
+        repoUrl,
+      }),
+    ).toBe(0);
+    expect(
+      countRepoSkills(skills, {
+        ...repo("HEAD"),
+        repoUrl: "https://git.example/o/r",
+      }),
+    ).toBe(0);
   });
 
   it("counts skills resolved from the default-branch sentinel", () => {
