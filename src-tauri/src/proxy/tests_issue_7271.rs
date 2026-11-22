@@ -85,9 +85,9 @@ mod tests {
         ];
         let mut sse = String::new();
         for chunk in chunks {
-            sse.push_str(&format!("data: {chunk}\n\n"));
+            sse.push_str(&format!("data: {chunk}\n\n")).unwrap();
         }
-        sse.push_str("data: [DONE]\n\n");
+        sse.push_str("data: [DONE]\n\n").unwrap();
 
         Response::builder()
             .status(StatusCode::OK)

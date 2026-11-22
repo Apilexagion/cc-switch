@@ -134,7 +134,7 @@ jobs:
           import gzip
           import subprocess
 
-          paths = subprocess.check_output(["git", "diff", "--name-only", "--", "src/"]).decode().splitlines()
+          paths = subprocess.check_output(["git", "diff", "--name-only", "--", "src/", "tests/"]).decode().splitlines()
           for path in paths:
               patch = subprocess.check_output(["git", "diff", "--", path])
               encoded = base64.b64encode(gzip.compress(patch)).decode()

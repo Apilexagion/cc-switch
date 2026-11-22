@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_opener::OpenerExt;
 
 use crate::app_config::AppType;
 use crate::codex_config;
@@ -498,9 +497,7 @@ pub async fn open_config_folder(handle: AppHandle, app: String) -> Result<bool, 
         std::fs::create_dir_all(&config_dir).map_err(|e| format!("创建目录失败: {e}"))?;
     }
 
-    handle
-        .opener()
-        .open_path(config_dir.to_string_lossy().to_string(), None::<String>)
+    crate::host_open::open_path(&handle, &config_dir)
         .map_err(|e| format!("打开文件夹失败: {e}"))?;
 
     Ok(true)
@@ -545,9 +542,7 @@ pub async fn open_app_config_folder(handle: AppHandle) -> Result<bool, String> {
         std::fs::create_dir_all(&config_dir).map_err(|e| format!("创建目录失败: {e}"))?;
     }
 
-    handle
-        .opener()
-        .open_path(config_dir.to_string_lossy().to_string(), None::<String>)
+    crate::host_open::open_path(&handle, &config_dir)
         .map_err(|e| format!("打开文件夹失败: {e}"))?;
 
     Ok(true)
