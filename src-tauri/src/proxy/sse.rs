@@ -161,6 +161,7 @@ pub(crate) struct SseBuffer {
     max_event_bytes: usize,
     event_bytes: usize,
     delimiter_tail: [u8; 2],
+    current_event_start: usize,
     max_pending_bytes: Option<usize>,
     skip_delimiter_state: Option<SkipDelimiterState>,
     dropped_oversized_events: usize,
@@ -186,6 +187,7 @@ impl SseBuffer {
             max_event_bytes,
             event_bytes: 0,
             delimiter_tail: [0; 2],
+            current_event_start: 0,
             max_pending_bytes: None,
             skip_delimiter_state: None,
             dropped_oversized_events: 0,
@@ -209,6 +211,16 @@ impl SseBuffer {
     /// back until complete (see [`append_utf8_safe`]).
     pub(crate) fn push_bytes(&mut self, mut bytes: &[u8]) -> io::Result<()> {
         self.check_event_bytes(bytes)?;
+        if bytes.is_empty() {
+            return Ok(());
+        }
+        self.compact();
+        self.check_append_bytes(bytes.len())?;
+        let Some(max_pending_bytes) = self.max_pending_bytes else {
+            append_utf8_safe(&mut self.text, &mut self.utf8_remainder, bytes);
+            return self.check_retained_bytes();
+        };
+
         while !bytes.is_empty() {
             if let Some(mut state) = self.skip_delimiter_state {
                 match state.advance_until_delimiter(bytes) {
@@ -224,21 +236,50 @@ impl SseBuffer {
                 }
             }
 
-            self.compact();
-            if self.would_overflow(bytes.len()) {
-                self.begin_skip_oversized_event();
-                continue;
+            let mut state = SkipDelimiterState::from_pending(
+                &self.text[self.current_event_start..],
+                &self.utf8_remainder,
+            );
+            match state.advance_until_delimiter(bytes) {
+                Some(next_offset) => {
+                    if self.event_would_overflow(next_offset, max_pending_bytes) {
+                        self.discard_current_event();
+                    } else {
+                        append_utf8_safe(
+                            &mut self.text,
+                            &mut self.utf8_remainder,
+                            &bytes[..next_offset],
+                        );
+                        self.current_event_start = self.text.len();
+                    }
+                    bytes = &bytes[next_offset..];
+                }
+                None => {
+                    if self.event_would_overflow(bytes.len(), max_pending_bytes) {
+                        self.discard_current_event();
+                        self.skip_delimiter_state = Some(state);
+                    } else {
+                        append_utf8_safe(&mut self.text, &mut self.utf8_remainder, bytes);
+                    }
+                    return self.check_retained_bytes();
+                }
             }
-
-            self.check_append_bytes(bytes.len())?;
-            append_utf8_safe(&mut self.text, &mut self.utf8_remainder, bytes);
-            return self.check_retained_bytes();
         }
-        Ok(())
+        self.check_retained_bytes()
     }
 
     pub(crate) fn push_str(&mut self, mut text: &str) -> io::Result<()> {
         self.check_event_bytes(text.as_bytes())?;
+        if text.is_empty() {
+            return Ok(());
+        }
+        self.compact();
+        self.check_append_bytes(text.len())?;
+        let Some(max_pending_bytes) = self.max_pending_bytes else {
+            self.text.push_str(text);
+            return self.check_retained_bytes();
+        };
+
         while !text.is_empty() {
             if let Some(mut state) = self.skip_delimiter_state {
                 match state.advance_until_delimiter(text.as_bytes()) {
@@ -254,17 +295,32 @@ impl SseBuffer {
                 }
             }
 
-            self.compact();
-            if self.would_overflow(text.len()) {
-                self.begin_skip_oversized_event();
-                continue;
+            let mut state = SkipDelimiterState::from_pending(
+                &self.text[self.current_event_start..],
+                &self.utf8_remainder,
+            );
+            match state.advance_until_delimiter(text.as_bytes()) {
+                Some(next_offset) => {
+                    if self.event_would_overflow(next_offset, max_pending_bytes) {
+                        self.discard_current_event();
+                    } else {
+                        self.text.push_str(&text[..next_offset]);
+                        self.current_event_start = self.text.len();
+                    }
+                    text = &text[next_offset..];
+                }
+                None => {
+                    if self.event_would_overflow(text.len(), max_pending_bytes) {
+                        self.discard_current_event();
+                        self.skip_delimiter_state = Some(state);
+                    } else {
+                        self.text.push_str(text);
+                    }
+                    return self.check_retained_bytes();
+                }
             }
-
-            self.check_append_bytes(text.len())?;
-            self.text.push_str(text);
-            return self.check_retained_bytes();
         }
-        Ok(())
+        self.check_retained_bytes()
     }
 
     fn size_error(&mut self) -> io::Error {
@@ -275,6 +331,7 @@ impl SseBuffer {
         self.event_bytes = 0;
         self.delimiter_tail = [0; 2];
         self.skip_delimiter_state = None;
+        self.current_event_start = 0;
         io::Error::new(
             io::ErrorKind::InvalidData,
             format!("SSE event exceeds {} byte limit", self.max_event_bytes),
@@ -353,6 +410,7 @@ impl SseBuffer {
         self.text.clear();
         self.consumed = 0;
         self.scan_from = 0;
+        self.current_event_start = 0;
         self.event_bytes = self.utf8_remainder.len();
         self.delimiter_tail = [0; 2];
     }
@@ -366,37 +424,34 @@ impl SseBuffer {
             self.text.push_str(&String::from_utf8_lossy(&remainder));
         }
         self.scan_from = 0;
+        self.current_event_start = 0;
         self.event_bytes = 0;
         self.delimiter_tail = [0; 2];
         std::mem::take(&mut self.text)
     }
 
-    fn would_overflow(&self, incoming_len: usize) -> bool {
-        let Some(max_pending_bytes) = self.max_pending_bytes else {
-            return false;
-        };
+    fn event_would_overflow(&self, incoming_len: usize, max_pending_bytes: usize) -> bool {
         self.text
             .len()
+            .saturating_sub(self.current_event_start)
             .saturating_add(self.utf8_remainder.len())
             .saturating_add(incoming_len)
             > max_pending_bytes
     }
 
-    fn begin_skip_oversized_event(&mut self) {
+    fn discard_current_event(&mut self) {
         self.dropped_oversized_events += 1;
-        let skip_state = SkipDelimiterState::from_pending(&self.text, &self.utf8_remainder);
-        self.skip_delimiter_state = Some(skip_state);
-        self.text.clear();
+        self.text.truncate(self.current_event_start);
         self.text.shrink_to_fit();
         self.utf8_remainder.clear();
-        self.consumed = 0;
-        self.scan_from = 0;
+        self.scan_from = self.scan_from.min(self.current_event_start);
     }
 
     fn compact(&mut self) {
         if self.consumed > 0 {
             self.text.drain(..self.consumed);
             self.scan_from -= self.consumed;
+            self.current_event_start = self.current_event_start.saturating_sub(self.consumed);
             self.consumed = 0;
         }
     }
@@ -930,5 +985,94 @@ mod tests {
             assert_eq!(sse.dropped_oversized_events(), 1);
             assert_eq!(drain_blocks(&mut sse), ["data: recovered"]);
         }
+    }
+
+    #[test]
+    fn bounded_sse_buffer_keeps_near_limit_event_followed_by_next_event_in_same_chunk() {
+        for delimiter in ["\n\n", "\r\n\r\n", "\n\r\n", "\r\n\n"] {
+            // Event 1 including its delimiter is exactly 64 bytes (at the limit),
+            // while event 1 + event 2 exceeds 64 bytes.
+            let prefix = "data: 你";
+            let pad_len = 64 - prefix.len() - delimiter.len();
+            let first_body = format!("{prefix}{}", "x".repeat(pad_len));
+            let combined = format!("{first_body}{delimiter}data: 好\n\n");
+            let bytes = combined.as_bytes();
+            assert_eq!(first_body.len() + delimiter.len(), 64);
+            assert!(bytes.len() > 64);
+
+            for split in 0..=bytes.len() {
+                let mut sse = SseBuffer::with_max_pending_bytes(64);
+                let mut blocks = Vec::new();
+                sse.push_bytes(&bytes[..split]).unwrap();
+                blocks.extend(drain_blocks(&mut sse));
+                sse.push_bytes(&bytes[split..]).unwrap();
+                blocks.extend(drain_blocks(&mut sse));
+                assert_eq!(
+                    blocks,
+                    [first_body.as_str(), "data: 好"],
+                    "{delimiter:?}, split {split}"
+                );
+                assert_eq!(
+                    sse.dropped_oversized_events(),
+                    0,
+                    "{delimiter:?}, split {split}"
+                );
+            }
+        }
+
+        // Same scenario via `push_str`.
+        let mut sse = SseBuffer::with_max_pending_bytes(64);
+        let first_part = format!("data: {}", "x".repeat(50)); // 56 bytes
+        sse.push_str(&first_part).unwrap();
+        sse.push_str("end\n\ndata: second\n\n").unwrap(); // event 1 = 61 bytes <= 64, total = 75 > 64
+        assert_eq!(sse.dropped_oversized_events(), 0);
+        assert_eq!(
+            drain_blocks(&mut sse),
+            [format!("{first_part}end"), "data: second".to_string()]
+        );
+    }
+
+    #[test]
+    fn bounded_sse_buffer_preserves_preceding_event_when_later_event_in_same_chunk_overflows() {
+        // Complete valid event + complete oversized event + valid event in one chunk.
+        let mut sse = SseBuffer::with_max_pending_bytes(64);
+        let chunk = format!("data: first\n\ndata: {}\n\ndata: third\n\n", "x".repeat(80));
+        sse.push_bytes(chunk.as_bytes()).unwrap();
+        assert_eq!(sse.dropped_oversized_events(), 1);
+        assert_eq!(drain_blocks(&mut sse), ["data: first", "data: third"]);
+
+        // Complete valid event + unterminated oversized event in one chunk.
+        let mut sse = SseBuffer::with_max_pending_bytes(64);
+        let chunk = format!("data: kept\n\ndata: {}", "y".repeat(80));
+        sse.push_bytes(chunk.as_bytes()).unwrap();
+        assert_eq!(sse.dropped_oversized_events(), 1);
+        assert_eq!(drain_blocks(&mut sse), ["data: kept"]);
+        sse.push_bytes(b"\n\ndata: resumed\n\n").unwrap();
+        assert_eq!(sse.dropped_oversized_events(), 1);
+        assert_eq!(drain_blocks(&mut sse), ["data: resumed"]);
+
+        // Complete valid event + leading newline on next event / empty event must
+        // match unbounded framing (no stale delimiter state across event boundaries).
+        let input = "data: a\n\n\ndata: b\n\n\n\ndata: c\n\n";
+        let expected: Vec<String> = SseBlocks::new(input).map(str::to_string).collect();
+        let mut sse = SseBuffer::with_max_pending_bytes(64);
+        sse.push_bytes(input.as_bytes()).unwrap();
+        assert_eq!(sse.dropped_oversized_events(), 0);
+        assert_eq!(drain_blocks(&mut sse), expected);
+
+        // Calling `next_block()` advances `scan_from` into the partial event;
+        // truncating on a later overflow must clamp `scan_from` safely and
+        // preserve delimiter state across chunks (`\n` -> `\r` -> `\n`).
+        let mut sse = SseBuffer::with_max_pending_bytes(64);
+        let mut first = "x".repeat(63);
+        first.push('\n');
+        sse.push_bytes(first.as_bytes()).unwrap();
+        assert!(sse.next_block().is_none());
+        sse.push_bytes(b"\r").unwrap();
+        assert_eq!(sse.dropped_oversized_events(), 1);
+        assert!(sse.next_block().is_none());
+        sse.push_bytes(b"\ndata: after_crlf\n\n").unwrap();
+        assert_eq!(sse.dropped_oversized_events(), 1);
+        assert_eq!(drain_blocks(&mut sse), ["data: after_crlf"]);
     }
 }
