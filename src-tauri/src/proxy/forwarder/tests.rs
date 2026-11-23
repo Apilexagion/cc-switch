@@ -1392,17 +1392,29 @@ fn input_capacity_uses_only_explicit_mapped_model_metadata() {
     });
     let body = json!({"model":"client"});
     assert_eq!(
-        fwd.configured_input_window(&AppType::Claude, &provider, &body),
+        fwd.configured_input_window(
+            &AppType::Claude,
+            &provider,
+            body.get("model").and_then(Value::as_str)
+        ),
         Some(128000)
     );
     provider.settings_config["config"] = json!("model_context_window = 200000\n");
     assert_eq!(
-        fwd.configured_input_window(&AppType::Codex, &provider, &body),
+        fwd.configured_input_window(
+            &AppType::Codex,
+            &provider,
+            body.get("model").and_then(Value::as_str)
+        ),
         Some(200000)
     );
     fwd.intent_model = Some("rewritten".into());
     assert_eq!(
-        fwd.configured_input_window(&AppType::Claude, &provider, &body),
+        fwd.configured_input_window(
+            &AppType::Claude,
+            &provider,
+            body.get("model").and_then(Value::as_str)
+        ),
         None
     );
 }
