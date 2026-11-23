@@ -30,6 +30,10 @@ impl ForwardBody {
         self.first.as_ref().expect("initial body has not been sent")
     }
 
+    pub(super) fn model(&self) -> Option<&str> {
+        self.model.as_ref().and_then(Value::as_str)
+    }
+
     pub(super) fn replay(&self) -> Result<Value, ProxyError> {
         #[cfg(test)]
         self.replay_count

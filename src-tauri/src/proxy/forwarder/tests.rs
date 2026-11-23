@@ -213,7 +213,7 @@ async fn gateway_official_codex_is_rejected_before_native_session_access() {
                 extensions: &extensions,
                 adapter: adapter.as_ref(),
             },
-            &json!({"model":"gpt-5"}),
+            json!({"model":"gpt-5"}),
             &mut None,
         )
         .await;

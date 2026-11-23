@@ -1223,7 +1223,7 @@ impl RequestForwarder {
                 // The enabled failover queue owns ordering and retry budget.
                 // Skip only capacities explicitly known to be insufficient;
                 // unknown capacities remain user-selected candidates, not guesses.
-                let window = self.configured_input_window(app_type, provider, body);
+                let window = self.configured_input_window(app_type, provider, body.model());
                 let too_small = window.is_some_and(|window| {
                     required_input_tokens.map_or_else(
                         || input_limit_floor.is_some_and(|failed| window <= failed),
@@ -1801,9 +1801,9 @@ impl RequestForwarder {
                         // The attempt guard returns any half-open slot on
                         // continue; try the existing queue without a health penalty.
                         input_limit_seen = true;
-                        let failed_window = limit
-                            .limit
-                            .or_else(|| self.configured_input_window(app_type, provider, body));
+                        let failed_window = limit.limit.or_else(|| {
+                            self.configured_input_window(app_type, provider, body.model())
+                        });
                         input_limit_floor =
                             input_limit_floor.into_iter().chain(failed_window).max();
                         required_input_tokens = required_input_tokens
@@ -2507,7 +2507,7 @@ impl RequestForwarder {
 
         // 转换请求体（如果需要）
         privacy_dirty |= codex_responses_to_chat || codex_responses_to_anthropic || needs_transform;
-        let mut request_body = if codex_responses_to_chat {
+        let request_body = if codex_responses_to_chat {
             let mut mapped_body = mapped_body;
             let explicit_prompt_cache_key = mapped_body
                 .get("prompt_cache_key")
@@ -3289,7 +3289,7 @@ impl RequestForwarder {
         &self,
         app: &AppType,
         provider: &Provider,
-        body: &Value,
+        incoming_model: Option<&str>,
     ) -> Option<u64> {
         if self.request_middleware.is_active()
             || self.request_rewrite.is_active()
@@ -3320,7 +3320,7 @@ impl RequestForwarder {
                 return Some(window);
             }
         }
-        let incoming = body.get("model").and_then(Value::as_str)?;
+        let incoming = incoming_model?;
         let mut model =
             super::model_mapper::ModelMapping::from_provider(provider).map_model(incoming);
         if *app == AppType::Codex

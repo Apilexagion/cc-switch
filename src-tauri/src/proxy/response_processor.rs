@@ -2280,7 +2280,8 @@ mod tests {
             StreamingTimeoutConfig {
                 first_byte_timeout: 0,
                 idle_timeout: 0,
-                ..Default::default()
+                keepalive_secs: 0,
+                loop_guard: false,
             },
             None,
             1024,
@@ -2334,7 +2335,8 @@ mod tests {
             StreamingTimeoutConfig {
                 first_byte_timeout: 0,
                 idle_timeout: 0,
-                ..Default::default()
+                keepalive_secs: 0,
+                loop_guard: false,
             },
             None,
         );
