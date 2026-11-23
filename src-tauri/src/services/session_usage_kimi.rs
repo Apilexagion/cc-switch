@@ -1101,65 +1101,69 @@ mod tests {
 
     #[test]
     fn kimi_usage_rescans_legacy_cursors_once_for_protocol_backfill() {
-        let db = Database::memory().unwrap();
-        let root = tempfile::tempdir().unwrap();
-        let path = root
-            .path()
-            .join("wd_project")
-            .join("session_one")
-            .join("agents")
-            .join("main")
-            .join("wire.jsonl");
-        write_records(
-            &path,
-            &protocol_step("main", "new-main", "new-model", 1_700_000_000_000, 50),
-        );
-        let key = format!("kimi:{}", path.to_string_lossy());
-        let metadata = fs::metadata(&path).unwrap();
-        let modified = metadata_modified_nanos(&metadata);
-        {
+        for prefix in ["kimi:", "kimi:v2:", "kimi:v3:"] {
+            let db = Database::memory().unwrap();
+            let root = tempfile::tempdir().unwrap();
+            let path = root
+                .path()
+                .join("wd_project")
+                .join("session_one")
+                .join("agents")
+                .join("main")
+                .join("wire.jsonl");
+            write_records(
+                &path,
+                &protocol_step("main", "new-main", "new-model", 1_700_000_000_000, 50),
+            );
+            let legacy_key = format!("{prefix}{}", path.to_string_lossy());
+            let key = format!("kimi:v3:{}", path.to_string_lossy());
+            let metadata = fs::metadata(&path).unwrap();
+            let modified = metadata_modified_nanos(&metadata);
+            {
+                let conn = db.conn.lock().unwrap();
+                update_sync_state_on_conn(&conn, &legacy_key, modified, metadata.len() as i64)
+                    .unwrap();
+            }
+            let result = sync_sessions(&db, root.path()).unwrap();
+            assert_eq!((result.files_scanned, result.imported), (1, 1));
+            assert_eq!(sync_sessions(&db, root.path()).unwrap().files_scanned, 0);
             let conn = db.conn.lock().unwrap();
-            update_sync_state_on_conn(&conn, &key, modified, metadata.len() as i64).unwrap();
-        }
-        let result = sync_sessions(&db, root.path()).unwrap();
-        assert_eq!((result.files_scanned, result.imported), (1, 1));
-        assert_eq!(sync_sessions(&db, root.path()).unwrap().files_scanned, 0);
-        let conn = db.conn.lock().unwrap();
-        let state: String = conn
-            .query_row(
-                "SELECT parser_state FROM session_log_sync WHERE file_path=?1",
+            let state: String = conn
+                .query_row(
+                    "SELECT parser_state FROM session_log_sync WHERE file_path=?1",
+                    [&key],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(state, KIMI_USAGE_PARSER_STATE);
+            // A previous parser generation may have persisted a model from an
+            // abandoned step. Rescan unchanged files and refresh the existing row.
+            conn.execute(
+                "UPDATE session_log_sync SET parser_state='step-usage-v1' WHERE file_path=?1",
                 [&key],
-                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(state, KIMI_USAGE_PARSER_STATE);
-        // A previous parser generation may have persisted a model from an
-        // abandoned step. Rescan unchanged files and refresh the existing row.
-        conn.execute(
-            "UPDATE session_log_sync SET parser_state='step-usage-v1' WHERE file_path=?1",
-            [&key],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE proxy_request_logs SET model='old-model',request_model='old-model'",
-            [],
-        )
-        .unwrap();
-        drop(conn);
-        let result = sync_sessions(&db, root.path()).unwrap();
-        assert_eq!((result.files_scanned, result.imported), (1, 1));
-        assert_eq!(sync_sessions(&db, root.path()).unwrap().files_scanned, 0);
-        let row: (i64, String) = db
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT COUNT(*),MIN(model) FROM proxy_request_logs",
+            conn.execute(
+                "UPDATE proxy_request_logs SET model='old-model',request_model='old-model'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(row, (1, "new-model".into()));
+            drop(conn);
+            let result = sync_sessions(&db, root.path()).unwrap();
+            assert_eq!((result.files_scanned, result.imported), (1, 1));
+            assert_eq!(sync_sessions(&db, root.path()).unwrap().files_scanned, 0);
+            let row: (i64, String) = db
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*),MIN(model) FROM proxy_request_logs",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap();
+            assert_eq!(row, (1, "new-model".into()));
+        }
     }
 
     fn subagent_step(agent: &str, id: &str, model: &str, start: i64, output: u64) -> Vec<Value> {
