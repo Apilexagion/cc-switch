@@ -2268,7 +2268,6 @@ fn login_shell_path_uses_login_environment_and_respects_the_runtime_deadline() {
 }
 
 #[test]
-#[test]
 fn opencode_desktop_sidecar_needs_the_gui_layout() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("opencode.exe"), b"").unwrap();

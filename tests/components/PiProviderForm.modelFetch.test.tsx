@@ -8,7 +8,11 @@ import { server } from "../msw/server";
 import { renderWithQueryClient as render } from "../utils/testQueryClient";
 import { piThinkingProfiles } from "@/config/piThinkingProfiles";
 import { waitForOverlayTransition } from "../utils/overlayTransition";
-import { completeModel, ompNode, openAdvancedOptions } from "./piProviderFormTestHelpers";
+import {
+  completeModel,
+  ompNode,
+  openAdvancedOptions,
+} from "./piProviderFormTestHelpers";
 
 const TAURI_ENDPOINT = "http://tauri.local";
 

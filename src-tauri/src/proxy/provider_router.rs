@@ -182,8 +182,9 @@ fn now_ms() -> i64 {
 /// 再按对应维度读取 [`UsageCache`](crate::services::usage_cache::UsageCache)：
 /// - 托管 Codex 账号：按 account_id 读 codex_oauth 快照；
 /// - 绑定 Claude 官方账号：按 account_id 读 claude_account 快照；
+/// - 绑定 xAI 账号或 xAI OAuth 卡：按 account_id 读 xai_account 快照；
 /// - 客户端订阅：按 AppType 读 subscription 快照；
-/// - 脚本型（Copilot/xAI/中转自定义脚本等）：当前版本不参与额度感知，返回 `None`（按未知殿后）。
+/// - 脚本型（Copilot/中转自定义脚本等）：返回 `None`（按未知殿后）。
 fn quota_view_for_provider(
     usage_cache: &crate::services::usage_cache::UsageCache,
     app: &AppType,
@@ -198,6 +199,11 @@ fn quota_view_for_provider(
             .flatten(),
         crate::tray::TrayUsageSource::ClaudeAccount(account_id) => usage_cache
             .with_claude_account(&account_id, |quota| {
+                quota_view_from_subscription(quota, now_ms)
+            })
+            .flatten(),
+        crate::tray::TrayUsageSource::XaiAccount(account_id) => usage_cache
+            .with_xai_account(&account_id, |quota| {
                 quota_view_from_subscription(quota, now_ms)
             })
             .flatten(),
@@ -1023,6 +1029,69 @@ mod tests {
             .unwrap(),
         );
         assert!(quota_view_for_provider(&cache, &AppType::Claude, &disabled, 0).is_none());
+    }
+
+    #[test]
+    fn xai_quota_routing_uses_the_selected_account_and_respects_the_toggle() {
+        for (app, provider_type, auth_provider) in [
+            (AppType::Claude, "xai_oauth", "xai_oauth"),
+            (AppType::Codex, "xai_oauth", "xai_oauth"),
+            (AppType::GrokBuild, "grok_official", "xai_oauth"),
+        ] {
+            let provider: Provider = serde_json::from_value(json!({
+                "id": "xai-bound",
+                "name": "Selected xAI account",
+                "settingsConfig": {},
+                "category": "official",
+                "meta": {
+                    "providerType": provider_type,
+                    "authBinding": {
+                        "source": "managed_account",
+                        "authProvider": auth_provider,
+                        "accountId": " account-a "
+                    }
+                }
+            }))
+            .unwrap();
+            let cache = crate::services::usage_cache::UsageCache::new();
+            let unrelated = quota_with_tiers(true, vec![tier(5.0, None)]);
+            cache.put_subscription(app.clone(), unrelated.clone());
+            cache.put_codex_oauth("account-a".into(), unrelated.clone());
+            cache.put_claude_account("account-a".into(), unrelated.clone());
+            cache.put_xai_account("account-b".into(), unrelated);
+            assert!(quota_view_for_provider(&cache, &app, &provider, 0).is_none());
+
+            cache.put_xai_account(
+                "account-a".into(),
+                quota_with_tiers(true, vec![tier(80.0, Some("1970-01-01T01:00:00Z"))]),
+            );
+            let view = quota_view_for_provider(&cache, &app, &provider, 0).unwrap();
+            assert!((view.remaining_fraction - 0.2).abs() < 1e-9);
+            assert_eq!(view.ms_until_reset, Some(3_600_000));
+            assert_eq!(
+                order_by(
+                    RoutingStrategy::Smart,
+                    &[("unknown", None), ("xai", Some(view))]
+                ),
+                ["xai", "unknown"]
+            );
+
+            let mut disabled = provider.clone();
+            disabled.meta.as_mut().unwrap().usage_script = Some(
+                serde_json::from_value(json!({
+                    "enabled": false, "language": "javascript", "code": ""
+                }))
+                .unwrap(),
+            );
+            assert!(quota_view_for_provider(&cache, &app, &disabled, 0).is_none());
+            cache.put_xai_account(
+                "account-a".into(),
+                quota_with_tiers(false, vec![tier(80.0, None)]),
+            );
+            assert!(quota_view_for_provider(&cache, &app, &provider, 0).is_none());
+            cache.invalidate_all();
+            assert!(quota_view_for_provider(&cache, &app, &provider, 0).is_none());
+        }
     }
 
     #[test]

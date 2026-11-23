@@ -4500,6 +4500,7 @@ fn discovery_lists_one_copy_per_install_name_like_waza_layout() {
     write_skill(&temp.path().join("b/Utils"), "utils-b");
     write_skill(&temp.path().join("a/utils"), "utils-a");
     let repo = SkillRepo {
+        repo_url: None,
         host: default_repo_host(),
         owner: "tw93".to_string(),
         name: "Waza".to_string(),

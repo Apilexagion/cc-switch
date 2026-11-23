@@ -390,6 +390,7 @@ fn refresh_existing(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::session_usage::load_sync_cursors;
     use serde_json::json;
 
     fn message(id: &str, time: i64, output: u64) -> Value {
