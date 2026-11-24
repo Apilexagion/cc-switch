@@ -318,6 +318,7 @@ mod tests {
     use serde_json::json;
     use serial_test::serial;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
     use std::time::Duration;
 
     fn webdav_sample(enabled: bool) -> WebDavSyncSettings {

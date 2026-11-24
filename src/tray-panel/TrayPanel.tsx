@@ -676,9 +676,6 @@ export function TrayPanel() {
       const offShow = await listen<PanelPlacement>(SHOW_EVENT, (event) => {
         void begin(event.payload);
       });
-      const offHide = await listen(HIDE_EVENT, () => {
-        setPanelVisible(false);
-      });
       const offChanged = await listen(CHANGED_EVENT, () => void load());
       const offHide = await listen(HIDE_EVENT, () => {
         showRequest.current += 1;
@@ -690,7 +687,6 @@ export function TrayPanel() {
         offShow();
         offHide();
         offChanged();
-        offHide();
         return;
       }
       offs.push(offShow, offHide, offChanged);
