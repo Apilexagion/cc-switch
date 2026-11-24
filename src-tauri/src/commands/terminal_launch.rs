@@ -2270,8 +2270,6 @@ mod tests {
         )
         .unwrap();
 
-        // `start /B /WAIT` runs the child in the same hidden console, so the
-        // test observes what the launched terminal would resolve.
         let args = [
             "/B",
             "/WAIT",
@@ -2303,6 +2301,614 @@ mod tests {
             "{restored:?}"
         );
         assert_eq!(std::env::var_os("PATH"), parent_path);
+    }
+
+    #[test]
+    fn unix_shell_command_and_exec_builders() {
+        let claude = format!(
+            "claude --settings {}",
+            shell_word("/tmp/claude config.json")
+        );
+        assert_eq!(
+            build_provider_command_line("/bin/zsh", &claude, None),
+            "'/bin/zsh' -lic 'claude --settings '\"'\"'/tmp/claude config.json'\"'\"''"
+        );
+        assert_eq!(
+            build_provider_command_line("/bin/bash", &claude, Some(Path::new("/tmp/project"))),
+            r#"'/bin/bash' -ic 'cd '"'"'/tmp/project'"'"' && claude --settings '"'"'/tmp/claude config.json'"'"''"#
+        );
+        assert_eq!(
+            build_provider_command_line(
+                "/bin/sh",
+                &claude,
+                Some(Path::new("/tmp/project O'Brien"))
+            ),
+            r#"'/bin/sh' -c 'cd '"'"'/tmp/project O'"'"'"'"'"'"'"'"'Brien'"'"' && claude --settings '"'"'/tmp/claude config.json'"'"''"#
+        );
+
+        assert_eq!(build_exec_line("/bin/zsh", None), "exec '/bin/zsh' -l");
+        assert_eq!(build_exec_line("/bin/bash", None), "exec '/bin/bash'");
+        assert_eq!(
+            build_exec_line("/tmp/shell'quote/zsh", None),
+            "exec '/tmp/shell'\"'\"'quote/zsh' -l"
+        );
+        assert_eq!(
+            build_exec_line("/bin/zsh", Some(Path::new("/tmp/project"))),
+            r#"exec '/bin/zsh' -lc 'cd '"'"'/tmp/project'"'"' || exit 1; exec '"'"'/bin/zsh'"'"' -i'"#
+        );
+
+        assert_eq!(
+            build_final_shell_cd_command("/bin/zsh", Some(Path::new("/tmp/project"))),
+            ""
+        );
+        assert_eq!(
+            build_final_shell_cd_command("/bin/bash", Some(Path::new("/tmp/project O'Brien"))),
+            "cd '/tmp/project O'\"'\"'Brien' || exit 1\n"
+        );
+    }
+
+    fn agy_key_launch() -> ProviderLaunch {
+        ProviderLaunch {
+            title: "Using a private Antigravity profile for this provider:",
+            detail: Some(PathBuf::from("/home/me/.cc-switch/agy/relay")),
+            program: "agy",
+            args: vec!["--gemini_dir=/home/me/.cc-switch/agy/relay".to_string()],
+            batch_command: format!("agy \"--gemini_dir=%{AGY_DIR_BATCH_VAR}%\""),
+            env: vec![
+                ("GEMINI_API_KEY", Some("k'$(echo no)`x`%PATH%".to_string())),
+                ("GOOGLE_GEMINI_BASE_URL", None),
+            ],
+            batch_vars: vec![(
+                AGY_DIR_BATCH_VAR,
+                r"C:\Users\张三\.cc-switch\agy\relay".to_string(),
+            )],
+            cleanup: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn launch_command_keeps_secrets_out_of_the_command_line() {
+        let launch = agy_key_launch();
+        assert_eq!(
+            unix_launch_command(&launch),
+            "env -u CC_SWITCH_LAUNCH_ENV_0 -u CC_SWITCH_LAUNCH_ENV_1 -u GOOGLE_GEMINI_BASE_URL GEMINI_API_KEY=\"$CC_SWITCH_LAUNCH_ENV_0\" agy --gemini_dir=/home/me/.cc-switch/agy/relay"
+        );
+        assert_eq!(
+            unix_launch_env_file(&launch),
+            "CC_SWITCH_LAUNCH_ENV_0='k'\"'\"'$(echo no)`x`%PATH%'\n"
+        );
+        let plain = ProviderLaunch {
+            env: Vec::new(),
+            ..agy_key_launch()
+        };
+        assert_eq!(
+            unix_launch_command(&plain),
+            "agy --gemini_dir=/home/me/.cc-switch/agy/relay"
+        );
+        assert_eq!(unix_launch_env_file(&plain), "");
+    }
+
+    #[test]
+    fn split_launch_args_groups_quoted_values_without_a_shell() {
+        assert_eq!(split_launch_args("  ").unwrap(), Vec::<String>::new());
+        assert_eq!(
+            split_launch_args(
+                "--debug --append-system-prompt \"be brief; ok\" --mcp-config 'C:\\a b\\mcp.json'\n-x=\"\""
+            )
+            .unwrap(),
+            vec![
+                "--debug",
+                "--append-system-prompt",
+                "be brief; ok",
+                "--mcp-config",
+                "C:\\a b\\mcp.json",
+                "-x=",
+            ]
+        );
+        assert_eq!(
+            split_launch_args("--name=\"it's\" ''").unwrap(),
+            vec!["--name=it's", ""]
+        );
+        assert!(split_launch_args("--append-system-prompt \"oops").is_err());
+        assert!(split_launch_args("\"line\nbreak\"").is_err());
+        let too_many = vec!["-v"; USER_ARG_BATCH_VARS.len() + 1].join(" ");
+        assert!(split_launch_args(&too_many).is_err());
+    }
+
+    #[test]
+    fn fish_gets_its_own_quoting_for_user_text() {
+        let provider = claude_runtime_test_provider(None, None);
+        let mut launch = claude_account_terminal_launch(None, &provider).unwrap();
+        launch.env.clear();
+        launch
+            .append_user_args(vec!["x\\'; printf INJECTED; #".into(), "C:\\work\\".into()])
+            .unwrap();
+        assert_eq!(
+            unix_launch_command_in(&launch, "/opt/homebrew/bin/fish"),
+            "claude 'x\\\\\\'; printf INJECTED; #' 'C:\\\\work\\\\'"
+        );
+        assert_eq!(
+            unix_launch_command_in(&launch, "/bin/zsh"),
+            "claude 'x\\'\"'\"'; printf INJECTED; #' 'C:\\work\\'"
+        );
+        // .bat 里收尾的反斜杠成对，Unix 参数保持原样
+        assert_eq!(launch.batch_vars[1].1, "C:\\work\\\\");
+        assert_eq!(launch.args[1], "C:\\work\\");
+        assert_eq!(
+            build_provider_command_line("/usr/bin/fish", "claude", Some(Path::new("/tmp/a\\'b"))),
+            "'/usr/bin/fish' -ic 'cd '\"'\"'/tmp/a\\\\\\'\"'\"'b'\"'\"' && claude'"
+        );
+        let provider = claude_runtime_test_provider(None, None);
+        let mut launch = claude_account_terminal_launch(None, &provider).unwrap();
+        launch.env.clear();
+        launch.append_user_args(vec!["=sh".into()]).unwrap();
+        assert_eq!(unix_launch_command_in(&launch, "/bin/zsh"), "claude '=sh'");
+    }
+
+    #[test]
+    fn user_args_and_skip_permissions_append_cleanly() {
+        let mut launch =
+            claude_account_terminal_launch(None, &claude_runtime_test_provider(None, None))
+                .unwrap();
+        launch.env.clear();
+        launch.skip_permissions();
+        launch
+            .append_user_args(vec!["--append-system-prompt".into(), "a & b | c".into()])
+            .unwrap();
+        assert_eq!(
+            unix_launch_command(&launch),
+            "claude --dangerously-skip-permissions --append-system-prompt 'a & b | c'"
+        );
+        assert_eq!(
+            launch.batch_command,
+            "claude --dangerously-skip-permissions \"%CC_SWITCH_ARG0%\" \"%CC_SWITCH_ARG1%\""
+        );
+        assert_eq!(
+            launch.batch_vars,
+            vec![
+                ("CC_SWITCH_ARG0", "--append-system-prompt".to_string()),
+                ("CC_SWITCH_ARG1", "a & b | c".to_string()),
+            ]
+        );
+
+        let mut agy = agy_key_launch();
+        agy.skip_permissions();
+        assert!(unix_launch_command(&agy).ends_with(
+            "agy --gemini_dir=/home/me/.cc-switch/agy/relay --dangerously-skip-permissions"
+        ));
+        assert_eq!(
+            agy.batch_command,
+            format!("agy \"--gemini_dir=%{AGY_DIR_BATCH_VAR}%\" --dangerously-skip-permissions")
+        );
+    }
+
+    #[test]
+    fn provider_specific_terminal_launches() {
+        // Grok: managed GROK_HOME + skip_permissions + user args
+        let mut grok = grok_launch("/home/me/.grok".to_string());
+        grok.skip_permissions();
+        grok.append_user_args(vec!["--model".into(), "grok-4.6".into()])
+            .unwrap();
+        assert_eq!(grok.args, vec!["--always-approve", "--model", "grok-4.6"]);
+        assert_eq!(
+            grok.batch_command,
+            "call grok --always-approve \"%CC_SWITCH_ARG0%\" \"%CC_SWITCH_ARG1%\""
+        );
+        assert!(unix_launch_command(&grok).starts_with(
+            "env -u CC_SWITCH_LAUNCH_ENV_0 GROK_HOME=\"$CC_SWITCH_LAUNCH_ENV_0\" grok "
+        ));
+
+        // Codex: separate `-c` overrides + API key kept out of command line
+        let mut codex = codex_launch(
+            "Kimi",
+            vec![
+                "model_provider='custom'".to_string(),
+                "model_providers.custom={name='K',base_url='https://k.example/v1?a=1&b=2'}"
+                    .to_string(),
+            ],
+            vec![("CC_SWITCH_CODEX_API_KEY", Some("sk-kimi".to_string()))],
+            Vec::new(),
+        )
+        .unwrap();
+        codex.skip_permissions();
+        assert!(!unix_launch_command(&codex).contains("sk-kimi"));
+        assert_eq!(
+            codex.batch_command,
+            "call codex -c \"%CC_SWITCH_CODEX_C0%\" -c \"%CC_SWITCH_CODEX_C1%\" --dangerously-bypass-approvals-and-sandbox"
+        );
+        assert_eq!(
+            codex_launch("Kimi", Vec::new(), Vec::new(), Vec::new())
+                .unwrap()
+                .batch_command,
+            "call codex"
+        );
+
+        // Antigravity official login: per-session `--model`, rejected by resume terminal
+        let mut row = crate::provider::Provider::with_id(
+            "login".into(),
+            "Google".into(),
+            serde_json::json!({"env":{},"config":{"model":{"name":"Gemini 3.1 Pro (High)"}}}),
+            None,
+        );
+        row.category = Some("official".into());
+        let agy = agy_terminal_launch(&row).unwrap();
+        assert!(agy.env.is_empty());
+        assert_eq!(
+            unix_launch_command(&agy),
+            "agy '--model=Gemini 3.1 Pro (High)'"
+        );
+        assert_eq!(
+            agy.batch_vars,
+            vec![(AGY_MODEL_BATCH_VAR, "Gemini 3.1 Pro (High)".to_string())]
+        );
+        assert!(open_agy_resume_terminal(&row, "abc", None).is_err());
+
+        row.settings_config = serde_json::json!({"env":{},"config":{}});
+        assert_eq!(
+            unix_launch_command(&agy_terminal_launch(&row).unwrap()),
+            "agy"
+        );
+    }
+
+    #[test]
+    fn copilot_byok_and_login_terminal_launches() {
+        // BYOK card: clears COPILOT_PROVIDER_* / COPILOT_MODEL, ignores bound account, passes reasoning effort
+        let prepared = crate::copilot_config::prepare_launch(
+            "relay",
+            &serde_json::json!({
+                "provider": {"baseUrl":"https://relay.test/v1","apiKey":"fixture-key","wireApi":"responses"},
+                "models": [{"id":"deepseek-v4-flash"}],
+                "reasoningEffort": "none"
+            }),
+        )
+        .unwrap();
+        let mut byok = copilot_launch_command(
+            "Relay",
+            prepared,
+            Some(("gho_x".into(), "github.com".into())),
+        )
+        .unwrap();
+        let cmd = unix_launch_command(&byok);
+        assert!(cmd.ends_with(" copilot --model=relay/deepseek-v4-flash --reasoning-effort=none"));
+        assert!(!cmd.contains("fixture-key") && !cmd.contains("gho_x"));
+        for key in crate::copilot_config::BYOK_ENV_KEYS {
+            assert!(cmd.contains(&format!("-u {key}")), "{key}: {cmd}");
+        }
+        assert!(cmd.contains("-u COPILOT_MODEL"), "{cmd}");
+        let env_file = unix_launch_env_file(&byok);
+        assert!(!env_file.contains("fixture-key") && !env_file.contains("gho_x"));
+
+        byok.skip_permissions();
+        byok.append_user_args(vec!["--add-dir".into(), "/tmp/a b".into()])
+            .unwrap();
+        assert!(unix_launch_command(&byok)
+            .ends_with(" --reasoning-effort=none --allow-all --add-dir '/tmp/a b'"));
+        assert!(byok.batch_command.ends_with(
+            " --reasoning-effort=none --allow-all \"%CC_SWITCH_ARG0%\" \"%CC_SWITCH_ARG1%\""
+        ));
+
+        // Official login card: passes bound account via env file (never argv)
+        let mut row = crate::provider::Provider::with_id(
+            "login".into(),
+            "GitHub".into(),
+            serde_json::json!({"env":{"COPILOT_MODEL":"claude-sonnet-4.6"}}),
+            None,
+        );
+        row.category = Some("official".into());
+        let login = copilot_terminal_launch(
+            &row,
+            Some(("gho_fixture".into(), "github.example.com".into())),
+        )
+        .unwrap();
+        let login_cmd = unix_launch_command(&login);
+        assert!(login_cmd.ends_with(" copilot --model=claude-sonnet-4.6"));
+        assert!(login_cmd.contains("-u COPILOT_PROVIDER_BASE_URL"));
+        assert!(!login_cmd.contains("gho_fixture"));
+        let login_env = unix_launch_env_file(&login);
+        assert!(login_env.contains("gho_fixture") && login_env.contains("github.example.com"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_launcher_script_passes_env_past_rc_files_and_cleans_up() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let bin = tmp.path().join("bin");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(
+            home.join(".bashrc"),
+            "export GEMINI_API_KEY=from-rc\nexport GOOGLE_GEMINI_BASE_URL=https://rc.test\n",
+        )
+        .unwrap();
+        let out = tmp.path().join("out");
+        std::fs::write(
+            bin.join("agy"),
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"${{GEMINI_API_KEY-unset}}\" \"${{GOOGLE_GEMINI_BASE_URL-unset}}\" \"${{CC_SWITCH_LAUNCH_ENV_0-unset}}\" \"$@\" > '{}'\n",
+                out.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(bin.join("agy"), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let launch = agy_key_launch();
+        let script = tmp.path().join("launcher.sh");
+        let env_file = tmp.path().join("env.sh");
+        std::fs::write(&env_file, unix_launch_env_file(&launch)).unwrap();
+        let content =
+            build_unix_launcher_script(&launch, "/bin/bash", None, &script, Some(&env_file))
+                .replace("exec '/bin/bash'", "exit 0 #");
+        std::fs::write(&script, content).unwrap();
+        let status = std::process::Command::new("sh")
+            .arg(&script)
+            .env("HOME", &home)
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("GEMINI_API_KEY", "from-gui")
+            .status()
+            .unwrap();
+        assert!(status.success());
+        assert_eq!(
+            std::fs::read_to_string(&out).unwrap(),
+            "k'$(echo no)`x`%PATH%\nunset\nunset\n--gemini_dir=/home/me/.cc-switch/agy/relay\n"
+        );
+        assert!(
+            !env_file.exists(),
+            "env file is removed right after reading"
+        );
+        assert!(!script.exists());
+    }
+
+    #[test]
+    fn windows_launch_env_scopes_values_and_carries_non_ascii_paths() {
+        let (lines, carried) = build_windows_launch_env(&agy_key_launch());
+        assert_eq!(
+            lines,
+            "set \"GEMINI_API_KEY=k'$(echo no)`x`%%PATH%%\"\r\n\
+             set \"GOOGLE_GEMINI_BASE_URL=\"\r\n\
+             set \"CC_SWITCH_AGY_DIR=%CC_SWITCH_INTERNAL_ENV_2%\"\r\n\
+             set \"CC_SWITCH_INTERNAL_ENV_2=\"\r\n"
+        );
+        assert_eq!(
+            carried,
+            vec![(
+                "CC_SWITCH_INTERNAL_ENV_2".to_string(),
+                r"C:\Users\张三\.cc-switch\agy\relay".to_string()
+            )]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_terminal_config_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let launch = claude_terminal_launch(
+            &[("ANTHROPIC_AUTH_TOKEN".into(), "t".into())],
+            "p",
+            "P",
+            &Default::default(),
+        )
+        .unwrap();
+        let file = &launch.cleanup[0];
+        assert_eq!(
+            std::fs::metadata(file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            launch.args,
+            vec![
+                "--settings".to_string(),
+                file.to_string_lossy().into_owned()
+            ]
+        );
+        std::fs::remove_file(file).unwrap();
+    }
+
+    #[test]
+    fn claude_terminal_config_model_picker_and_switch_drops() {
+        let read_config = |env: &[(&str, &str)], drops: &crate::services::provider::SwitchDrops| {
+            let env: Vec<(String, String)> = env
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            let launch = claude_terminal_launch(&env, "p", "DeepSeek", drops).unwrap();
+            let file = &launch.cleanup[0];
+            let value: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+            std::fs::remove_file(file).unwrap();
+            value
+        };
+
+        // Explicit tier models -> replaceBuiltInOptions=true with formatted labels.
+        let value = read_config(
+            &[
+                ("ANTHROPIC_MODEL", "deepseek-v4-pro"),
+                ("ANTHROPIC_DEFAULT_OPUS_MODEL", "deepseek-v4-pro[1M]"),
+                ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "deepseek-v4-flash"),
+                ("ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME", "Flash"),
+            ],
+            &Default::default(),
+        );
+        assert_eq!(
+            value["modelPicker"],
+            serde_json::json!({
+                "replaceBuiltInOptions": true,
+                "options": [
+                    {
+                        "model": "opus",
+                        "label": "Opus · deepseek-v4-pro",
+                        "description": "DeepSeek · deepseek-v4-pro · 1M",
+                    },
+                    {
+                        "model": "haiku",
+                        "label": "Haiku · Flash",
+                        "description": "DeepSeek · deepseek-v4-flash",
+                    },
+                ],
+            })
+        );
+
+        // No tier models & no drops -> writes only `env` and empty `modelPicker`.
+        let plain = read_config(
+            &[("ANTHROPIC_MODEL", "deepseek-v4-pro")],
+            &Default::default(),
+        );
+        let keys: Vec<&String> = plain.as_object().unwrap().keys().collect();
+        assert_eq!(keys, ["env", "modelPicker"]);
+        assert_eq!(
+            plain["modelPicker"],
+            serde_json::json!({ "replaceBuiltInOptions": false, "options": [] })
+        );
+
+        // Switch drops shadow removed keys without overriding card's own values.
+        let drops = crate::services::provider::SwitchDrops {
+            env: serde_json::json!({
+                "ANTHROPIC_AUTH_TOKEN": "PROXY_MANAGED",
+                "ANTHROPIC_DEFAULT_OPUS_MODEL": "ccs-claude-kimi--k3[1M]",
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+            top: serde_json::json!({
+                "model": "ccs-claude-kimi--k3[1M]",
+                "modelOverrides": { "a": "b" },
+                "modelPicker": { "replaceBuiltInOptions": true, "options": [] },
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        };
+        let shadowed = read_config(
+            &[
+                ("ANTHROPIC_API_KEY", "sk"),
+                ("ANTHROPIC_DEFAULT_OPUS_MODEL", "deepseek-v4-pro"),
+            ],
+            &drops,
+        );
+        assert_eq!(shadowed["env"]["ANTHROPIC_API_KEY"], "sk");
+        assert_eq!(
+            shadowed["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"],
+            "deepseek-v4-pro"
+        );
+        assert_eq!(shadowed["env"]["ANTHROPIC_AUTH_TOKEN"], "");
+        assert_eq!(shadowed["model"], "");
+        assert_eq!(shadowed["modelOverrides"], serde_json::json!({}));
+        assert_eq!(shadowed["modelPicker"]["options"][0]["model"], "opus");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_applescript_launchers_quote_paths_and_handle_cold_start() {
+        let p = Path::new("/Users/me/it's dir/x.sh");
+        assert_eq!(
+            build_macos_dash_c_command(p),
+            r#"exec sh '/Users/me/it'"'"'s dir/x.sh'"#
+        );
+        let expected_sh = r#""sh '/Users/me/it'\"'\"'s dir/x.sh'""#;
+        let expected_exec = r#""exec sh '/Users/me/it'\"'\"'s dir/x.sh'""#;
+        assert_eq!(applescript_launcher_command(p), expected_sh);
+        assert_eq!(applescript_exec_launcher_command(p), expected_exec);
+
+        let terminal = build_macos_terminal_applescript(p);
+        assert!(terminal.contains(expected_exec));
+        assert!(terminal
+            .contains("else\n        launch\n        do script launcher_script\n        activate"));
+        assert!(!terminal.contains(" in window 1"));
+
+        let iterm2 = build_macos_iterm2_applescript(p);
+        assert!(iterm2.contains(expected_exec));
+        assert!(iterm2.contains("repeat while (count of windows) = 0"));
+
+        let ghostty = build_macos_ghostty_applescript(p);
+        assert!(ghostty.contains(expected_sh));
+        assert!(ghostty.contains("new window with configuration {command:launcher_command}"));
+        assert!(ghostty.contains("--initial-command="));
+    }
+
+    #[test]
+    fn build_windows_cwd_command_str_handles_drive_unc_escaping_and_non_ascii() {
+        assert_eq!(
+            build_windows_cwd_command_str(r"C:\work\repo"),
+            (
+                "cd /d \"C:\\work\\repo\" || exit /b 1\r\n".to_string(),
+                None
+            )
+        );
+        assert_eq!(
+            build_windows_cwd_command_str(r"\\wsl$\Ubuntu\home\coder\repo").0,
+            "pushd \"\\\\wsl$\\Ubuntu\\home\\coder\\repo\" || exit /b 1\r\n"
+        );
+        assert_eq!(
+            build_windows_cwd_command_str(r"\\server\share\100%&(test)").0,
+            "pushd \"\\\\server\\share\\100%%^&^(test^)\" || exit /b 1\r\n"
+        );
+
+        // cmd 按控制台代码页解码 .bat，非 ASCII 路径经环境变量中转（#8034）。
+        let path = r"C:\Users\林增文\项目";
+        let (command, env) = build_windows_cwd_command_str(path);
+        assert!(command.is_ascii());
+        assert_eq!(
+            command,
+            "cd /d \"%CC_SWITCH_INTERNAL_CWD%\" || exit /b 1\r\nset \"CC_SWITCH_INTERNAL_CWD=\"\r\n"
+        );
+        assert_eq!(env.as_deref(), Some(path));
+
+        let (unc_cmd, unc_env) = build_windows_cwd_command_str(r"\\server\共享\repo");
+        assert!(unc_cmd.starts_with("pushd \"%CC_SWITCH_INTERNAL_CWD%\" || exit /b 1\r\n"));
+        assert_eq!(unc_env.as_deref(), Some(r"\\server\共享\repo"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn wsl_hermes_dashboard_runs_inside_the_distro_login_shell() {
+        let line = wsl_hermes_dashboard_line("Ubuntu-22.04").expect("valid WSL command line");
+        assert_eq!(
+            line,
+            r#"wsl.exe -d Ubuntu-22.04 -- sh -c "\"${SHELL:-sh}\" -lic 'hermes dashboard'""#
+        );
+        assert!(wsl_hermes_dashboard_line("Ubuntu & calc").is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_valid_user_shell_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = tempfile::tempdir().unwrap();
+        let set_exec = |path: &Path, executable: bool| {
+            std::fs::write(path, "#!/usr/bin/env sh\n").unwrap();
+            let mode = if executable { 0o755 } else { 0o644 };
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+        };
+        let executable_zsh = temp.path().join("zsh");
+        set_exec(&executable_zsh, true);
+        let executable_fish_dir = temp.path().join("homebrew dir/bin");
+        std::fs::create_dir_all(&executable_fish_dir).unwrap();
+        let executable_fish = executable_fish_dir.join("fish");
+        set_exec(&executable_fish, true);
+        let non_executable_bash = temp.path().join("bash");
+        set_exec(&non_executable_bash, false);
+
+        assert!(valid_user_shell_path(&executable_zsh.to_string_lossy()));
+        assert!(valid_user_shell_path(&executable_fish.to_string_lossy()));
+        for bad in [
+            "".to_string(),
+            "zsh".to_string(),
+            temp.path()
+                .join("missing/zsh")
+                .to_string_lossy()
+                .into_owned(),
+            non_executable_bash.to_string_lossy().into_owned(),
+            temp.path()
+                .join("zsh; rm -rf /")
+                .to_string_lossy()
+                .into_owned(),
+            format!("{}\n/bin/bash", executable_zsh.to_string_lossy()),
+            "/usr/bin/powershell".to_string(),
+        ] {
+            assert!(!valid_user_shell_path(&bad), "{bad}");
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -2490,183 +3096,6 @@ mod tests {
         });
     }
 
-    #[cfg(unix)]
-    fn set_test_executable(path: &Path, executable: bool) {
-        use std::os::unix::fs::PermissionsExt;
-
-        let mode = if executable { 0o755 } else { 0o644 };
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
-            .expect("fixture permissions should be set");
-    }
-
-    #[test]
-    fn test_build_exec_line() {
-        assert_eq!(build_exec_line("/bin/zsh", None), "exec '/bin/zsh' -l");
-        assert_eq!(build_exec_line("/bin/bash", None), "exec '/bin/bash'");
-        assert_eq!(
-            build_exec_line("/opt/homebrew dir/bin/fish", None),
-            "exec '/opt/homebrew dir/bin/fish'"
-        );
-        assert_eq!(build_exec_line("/bin/sh", None), "exec '/bin/sh'");
-        assert_eq!(
-            build_exec_line("/tmp/shell'quote/zsh", None),
-            "exec '/tmp/shell'\"'\"'quote/zsh' -l"
-        );
-        assert_eq!(
-            build_exec_line("/bin/zsh", Some(Path::new("/tmp/project"))),
-            r#"exec '/bin/zsh' -lc 'cd '"'"'/tmp/project'"'"' || exit 1; exec '"'"'/bin/zsh'"'"' -i'"#
-        );
-    }
-
-    #[test]
-    fn test_build_provider_command_line_uses_user_shell_environment() {
-        let claude = format!(
-            "claude --settings {}",
-            shell_word("/tmp/claude config.json")
-        );
-        assert_eq!(
-            build_provider_command_line("/bin/zsh", &claude, None),
-            "'/bin/zsh' -lic 'claude --settings '\"'\"'/tmp/claude config.json'\"'\"''"
-        );
-        assert_eq!(
-            build_provider_command_line("/bin/bash", &claude, Some(Path::new("/tmp/project"))),
-            r#"'/bin/bash' -ic 'cd '"'"'/tmp/project'"'"' && claude --settings '"'"'/tmp/claude config.json'"'"''"#
-        );
-        assert_eq!(
-            build_provider_command_line(
-                "/bin/sh",
-                &claude,
-                Some(Path::new("/tmp/project O'Brien"))
-            ),
-            r#"'/bin/sh' -c 'cd '"'"'/tmp/project O'"'"'"'"'"'"'"'"'Brien'"'"' && claude --settings '"'"'/tmp/claude config.json'"'"''"#
-        );
-    }
-
-    fn agy_key_launch() -> ProviderLaunch {
-        ProviderLaunch {
-            title: "Using a private Antigravity profile for this provider:",
-            detail: Some(PathBuf::from("/home/me/.cc-switch/agy/relay")),
-            program: "agy",
-            args: vec!["--gemini_dir=/home/me/.cc-switch/agy/relay".to_string()],
-            batch_command: format!("agy \"--gemini_dir=%{AGY_DIR_BATCH_VAR}%\""),
-            env: vec![
-                ("GEMINI_API_KEY", Some("k'$(echo no)`x`%PATH%".to_string())),
-                ("GOOGLE_GEMINI_BASE_URL", None),
-            ],
-            batch_vars: vec![(
-                AGY_DIR_BATCH_VAR,
-                r"C:\Users\张三\.cc-switch\agy\relay".to_string(),
-            )],
-            cleanup: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn launch_command_keeps_secrets_out_of_the_command_line() {
-        let launch = agy_key_launch();
-        assert_eq!(
-            unix_launch_command(&launch),
-            "env -u CC_SWITCH_LAUNCH_ENV_0 -u CC_SWITCH_LAUNCH_ENV_1 -u GOOGLE_GEMINI_BASE_URL GEMINI_API_KEY=\"$CC_SWITCH_LAUNCH_ENV_0\" agy --gemini_dir=/home/me/.cc-switch/agy/relay"
-        );
-        assert_eq!(
-            unix_launch_env_file(&launch),
-            "CC_SWITCH_LAUNCH_ENV_0='k'\"'\"'$(echo no)`x`%PATH%'\n"
-        );
-        let plain = ProviderLaunch {
-            env: Vec::new(),
-            ..agy_key_launch()
-        };
-        assert_eq!(
-            unix_launch_command(&plain),
-            "agy --gemini_dir=/home/me/.cc-switch/agy/relay"
-        );
-        assert_eq!(unix_launch_env_file(&plain), "");
-    }
-
-    #[test]
-    fn split_launch_args_groups_quoted_values_without_a_shell() {
-        assert_eq!(split_launch_args("  ").unwrap(), Vec::<String>::new());
-        assert_eq!(
-            split_launch_args(
-                "--debug --append-system-prompt \"be brief; ok\" --mcp-config 'C:\\a b\\mcp.json'\n-x=\"\""
-            )
-            .unwrap(),
-            vec![
-                "--debug",
-                "--append-system-prompt",
-                "be brief; ok",
-                "--mcp-config",
-                "C:\\a b\\mcp.json",
-                "-x=",
-            ]
-        );
-        // 引号可以接在词中间，引号里也能放另一种引号
-        assert_eq!(
-            split_launch_args("--name=\"it's\" ''").unwrap(),
-            vec!["--name=it's", ""]
-        );
-        assert!(split_launch_args("--append-system-prompt \"oops").is_err());
-        assert!(split_launch_args("\"line\nbreak\"").is_err());
-        let too_many = vec!["-v"; USER_ARG_BATCH_VARS.len() + 1].join(" ");
-        assert!(split_launch_args(&too_many).is_err());
-    }
-
-    #[test]
-    fn fish_gets_its_own_quoting_for_user_text() {
-        let provider = claude_runtime_test_provider(None, None);
-        let mut launch = claude_account_terminal_launch(None, &provider).unwrap();
-        launch.env.clear();
-        launch
-            .append_user_args(vec!["x\\'; printf INJECTED; #".into(), "C:\\work\\".into()])
-            .unwrap();
-        assert_eq!(
-            unix_launch_command_in(&launch, "/opt/homebrew/bin/fish"),
-            "claude 'x\\\\\\'; printf INJECTED; #' 'C:\\\\work\\\\'"
-        );
-        assert_eq!(
-            unix_launch_command_in(&launch, "/bin/zsh"),
-            "claude 'x\\'\"'\"'; printf INJECTED; #' 'C:\\work\\'"
-        );
-        // .bat 里收尾的反斜杠成对，Unix 参数保持原样
-        assert_eq!(launch.batch_vars[1].1, "C:\\work\\\\");
-        assert_eq!(launch.args[1], "C:\\work\\");
-        assert_eq!(
-            build_provider_command_line("/usr/bin/fish", "claude", Some(Path::new("/tmp/a\\'b"))),
-            "'/usr/bin/fish' -ic 'cd '\"'\"'/tmp/a\\\\\\'\"'\"'b'\"'\"' && claude'"
-        );
-        let provider = claude_runtime_test_provider(None, None);
-        let mut launch = claude_account_terminal_launch(None, &provider).unwrap();
-        launch.env.clear();
-        launch.append_user_args(vec!["=sh".into()]).unwrap();
-        assert_eq!(unix_launch_command_in(&launch, "/bin/zsh"), "claude '=sh'");
-    }
-
-    #[test]
-    fn user_args_follow_the_generated_args_and_pass_through_batch_vars() {
-        let provider = claude_runtime_test_provider(None, None);
-        let mut launch = claude_account_terminal_launch(None, &provider).unwrap();
-        launch.env.clear();
-        launch.skip_permissions();
-        launch
-            .append_user_args(vec!["--append-system-prompt".into(), "a & b | c".into()])
-            .unwrap();
-        assert_eq!(
-            unix_launch_command(&launch),
-            "claude --dangerously-skip-permissions --append-system-prompt 'a & b | c'"
-        );
-        assert_eq!(
-            launch.batch_command,
-            "claude --dangerously-skip-permissions \"%CC_SWITCH_ARG0%\" \"%CC_SWITCH_ARG1%\""
-        );
-        assert_eq!(
-            launch.batch_vars,
-            vec![
-                ("CC_SWITCH_ARG0", "--append-system-prompt".to_string()),
-                ("CC_SWITCH_ARG1", "a & b | c".to_string()),
-            ]
-        );
-    }
-
     #[test]
     fn windows_relay_claude_user_args_use_raw_private_carriers() {
         let mut launch = ProviderLaunch {
@@ -2749,90 +3178,6 @@ mod tests {
     }
 
     #[test]
-    fn skip_permissions_appends_the_flag_on_every_platform() {
-        let provider = claude_runtime_test_provider(None, None);
-        let mut launch = claude_account_terminal_launch(None, &provider).unwrap();
-        launch.env.clear();
-        launch.skip_permissions();
-        assert_eq!(
-            unix_launch_command(&launch),
-            "claude --dangerously-skip-permissions"
-        );
-        assert_eq!(
-            launch.batch_command,
-            "claude --dangerously-skip-permissions"
-        );
-
-        let mut launch = agy_key_launch();
-        launch.skip_permissions();
-        assert!(unix_launch_command(&launch).ends_with(
-            "agy --gemini_dir=/home/me/.cc-switch/agy/relay --dangerously-skip-permissions"
-        ));
-        assert_eq!(
-            launch.batch_command,
-            format!("agy \"--gemini_dir=%{AGY_DIR_BATCH_VAR}%\" --dangerously-skip-permissions")
-        );
-    }
-
-    #[test]
-    fn grok_launch_runs_plain_grok_against_the_managed_home() {
-        let mut launch = grok_launch("/home/me/.grok".to_string());
-        launch.skip_permissions();
-        launch
-            .append_user_args(vec!["--model".to_string(), "grok-4.6".to_string()])
-            .unwrap();
-        assert_eq!(launch.program, "grok");
-        assert_eq!(launch.args, vec!["--always-approve", "--model", "grok-4.6"]);
-        assert_eq!(
-            launch.batch_command,
-            "call grok --always-approve \"%CC_SWITCH_ARG0%\" \"%CC_SWITCH_ARG1%\""
-        );
-        assert_eq!(
-            launch.env,
-            vec![("GROK_HOME", Some("/home/me/.grok".to_string()))]
-        );
-        assert!(unix_launch_command(&launch).starts_with(
-            "env -u CC_SWITCH_LAUNCH_ENV_0 GROK_HOME=\"$CC_SWITCH_LAUNCH_ENV_0\" grok "
-        ));
-    }
-
-    #[test]
-    fn codex_launch_passes_overrides_as_separate_arguments() {
-        let mut launch = codex_launch(
-            "Kimi",
-            vec![
-                "model_provider='custom'".to_string(),
-                "model_providers.custom={name='K',base_url='https://k.example/v1?a=1&b=2'}"
-                    .to_string(),
-            ],
-            vec![("CC_SWITCH_CODEX_API_KEY", Some("sk-kimi".to_string()))],
-            Vec::new(),
-        )
-        .unwrap();
-        launch.skip_permissions();
-        assert_eq!(
-            launch.args,
-            vec![
-                "-c",
-                "model_provider='custom'",
-                "-c",
-                "model_providers.custom={name='K',base_url='https://k.example/v1?a=1&b=2'}",
-                "--dangerously-bypass-approvals-and-sandbox",
-            ]
-        );
-        assert!(!unix_launch_command(&launch).contains("sk-kimi"));
-        assert_eq!(
-            launch.batch_command,
-            "call codex -c \"%CC_SWITCH_CODEX_C0%\" -c \"%CC_SWITCH_CODEX_C1%\" --dangerously-bypass-approvals-and-sandbox"
-        );
-        assert_eq!(launch.batch_vars[1].0, "CC_SWITCH_CODEX_C1");
-
-        let plain = codex_launch("Kimi", Vec::new(), Vec::new(), Vec::new()).unwrap();
-        assert_eq!(plain.batch_command, "call codex");
-        assert!(plain.args.is_empty());
-    }
-
-    #[test]
     fn windows_codex_launch_uses_private_env_carriers_and_argument_arrays() {
         let key = "secret-key-\"&%^";
         let home = r"C:\Users\张三\Codex & personal";
@@ -2868,215 +3213,6 @@ mod tests {
         assert!(!script.contains("Invoke-Expression"));
         let plain = codex_launch("Relay", Vec::new(), Vec::new(), Vec::new()).unwrap();
         assert!(needs_windows_env_launcher(&plain));
-    }
-
-    #[test]
-    fn agy_login_launch_picks_the_model_for_this_session_only() {
-        let mut row = crate::provider::Provider::with_id(
-            "login".into(),
-            "Google".into(),
-            serde_json::json!({"env":{},"config":{"model":{"name":"Gemini 3.1 Pro (High)"}}}),
-            None,
-        );
-        row.category = Some("official".into());
-        let launch = agy_terminal_launch(&row).unwrap();
-        assert!(launch.env.is_empty());
-        assert_eq!(launch.detail, None);
-        assert_eq!(
-            unix_launch_command(&launch),
-            "agy '--model=Gemini 3.1 Pro (High)'"
-        );
-        assert_eq!(
-            launch.batch_command,
-            format!("agy \"--model=%{AGY_MODEL_BATCH_VAR}%\"")
-        );
-        assert_eq!(
-            launch.batch_vars,
-            vec![(AGY_MODEL_BATCH_VAR, "Gemini 3.1 Pro (High)".to_string())]
-        );
-        // 带了 `--model` 的官方卡也没有私有目录，会话恢复不会把它当成 Key 卡（在开终端前就报错）。
-        assert!(open_agy_resume_terminal(&row, "abc", None).is_err());
-
-        row.settings_config = serde_json::json!({"env":{},"config":{}});
-        let launch = agy_terminal_launch(&row).unwrap();
-        assert_eq!(unix_launch_command(&launch), "agy");
-        assert_eq!(launch.batch_command, "agy");
-    }
-
-    fn copilot_byok_launch(settings: serde_json::Value) -> crate::copilot_config::CopilotLaunch {
-        crate::copilot_config::prepare_launch("relay", &settings).unwrap()
-    }
-
-    #[test]
-    fn copilot_byok_launch_selects_the_card_model_and_clears_byok_variables() {
-        let launch = copilot_byok_launch(serde_json::json!({
-            "provider": {"baseUrl":"https://relay.test/v1","apiKey":"fixture-key","wireApi":"responses"},
-            "models": [{"id":"gpt-5.4"}]
-        }));
-        // A bound account never applies to bring-your-own-model cards.
-        let launch =
-            copilot_launch_command("Relay", launch, Some(("gho_x".into(), "github.com".into())))
-                .unwrap();
-        let command = unix_launch_command(&launch);
-        assert!(
-            command.ends_with(" copilot --model=relay/gpt-5.4"),
-            "{command}"
-        );
-        assert!(!command.contains("fixture-key"), "{command}");
-        assert!(!command.contains("gho_x"), "{command}");
-        // providers.json is ignored while any COPILOT_PROVIDER_* is set, so all are cleared.
-        for key in crate::copilot_config::BYOK_ENV_KEYS {
-            assert!(command.contains(&format!("-u {key}")), "{key}: {command}");
-        }
-        assert!(command.contains("-u COPILOT_MODEL"), "{command}");
-        let env_file = unix_launch_env_file(&launch);
-        assert!(!env_file.contains("fixture-key"));
-        assert!(!env_file.contains("gho_x"));
-        assert_eq!(
-            launch.batch_command,
-            format!("call copilot \"--model=%{COPILOT_MODEL_BATCH_VAR}%\"")
-        );
-        assert_eq!(
-            launch.batch_vars,
-            vec![(COPILOT_MODEL_BATCH_VAR, "relay/gpt-5.4".to_string())]
-        );
-    }
-
-    #[test]
-    fn copilot_launch_passes_the_card_reasoning_effort() {
-        let launch = copilot_byok_launch(serde_json::json!({
-            "provider": {"baseUrl":"https://relay.test/v1","apiKey":"fixture-key","wireApi":"responses"},
-            "models": [{"id":"deepseek-v4-flash"}],
-            "reasoningEffort":"none"
-        }));
-        let mut launch = copilot_launch_command("Relay", launch, None).unwrap();
-        assert!(
-            unix_launch_command(&launch)
-                .ends_with(" copilot --model=relay/deepseek-v4-flash --reasoning-effort=none"),
-            "{}",
-            unix_launch_command(&launch)
-        );
-        assert_eq!(
-            launch.batch_command,
-            format!("call copilot \"--model=%{COPILOT_MODEL_BATCH_VAR}%\" --reasoning-effort=none")
-        );
-
-        launch.skip_permissions();
-        assert!(
-            unix_launch_command(&launch).ends_with(" --reasoning-effort=none --allow-all"),
-            "{}",
-            unix_launch_command(&launch)
-        );
-        assert!(launch
-            .batch_command
-            .ends_with(" --reasoning-effort=none --allow-all"));
-
-        // 「打开终端」里的附加参数接在 `--allow-all` 后面
-        launch
-            .append_user_args(vec!["--add-dir".into(), "/tmp/a b".into()])
-            .unwrap();
-        assert!(
-            unix_launch_command(&launch)
-                .ends_with(" --reasoning-effort=none --allow-all --add-dir '/tmp/a b'"),
-            "{}",
-            unix_launch_command(&launch)
-        );
-        assert!(launch.batch_command.ends_with(
-            " --reasoning-effort=none --allow-all \"%CC_SWITCH_ARG0%\" \"%CC_SWITCH_ARG1%\""
-        ));
-    }
-
-    #[test]
-    fn copilot_login_launch_uses_the_model_flag_and_bound_account() {
-        let mut row = crate::provider::Provider::with_id(
-            "login".into(),
-            "GitHub".into(),
-            serde_json::json!({"env":{"COPILOT_MODEL":"claude-sonnet-4.6"}}),
-            None,
-        );
-        row.category = Some("official".into());
-        let launch = copilot_terminal_launch(&row, None).unwrap();
-        let command = unix_launch_command(&launch);
-        assert!(
-            command.ends_with(" copilot --model=claude-sonnet-4.6"),
-            "{command}"
-        );
-        assert!(
-            command.contains("-u COPILOT_PROVIDER_BASE_URL"),
-            "{command}"
-        );
-        assert_eq!(
-            launch.batch_command,
-            format!("call copilot \"--model=%{COPILOT_MODEL_BATCH_VAR}%\"")
-        );
-
-        let launch = copilot_terminal_launch(
-            &row,
-            Some(("gho_fixture".into(), "github.example.com".into())),
-        )
-        .unwrap();
-        assert!(!unix_launch_command(&launch).contains("gho_fixture"));
-        let env_file = unix_launch_env_file(&launch);
-        assert!(env_file.contains("gho_fixture"));
-        assert!(env_file.contains("github.example.com"));
-
-        row.settings_config = serde_json::json!({"env":{}});
-        let launch = copilot_terminal_launch(&row, None).unwrap();
-        assert!(unix_launch_command(&launch).ends_with(" copilot"));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn unix_launcher_script_passes_env_past_rc_files_and_cleans_up() {
-        use std::os::unix::fs::PermissionsExt;
-        let tmp = tempfile::tempdir().unwrap();
-        let home = tmp.path().join("home");
-        let bin = tmp.path().join("bin");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(&bin).unwrap();
-        // A user rc that exports its own Gemini variables must not win.
-        std::fs::write(
-            home.join(".bashrc"),
-            "export GEMINI_API_KEY=from-rc\nexport GOOGLE_GEMINI_BASE_URL=https://rc.test\n",
-        )
-        .unwrap();
-        let out = tmp.path().join("out");
-        std::fs::write(
-            bin.join("agy"),
-            format!(
-                "#!/bin/sh\nprintf '%s\\n' \"${{GEMINI_API_KEY-unset}}\" \"${{GOOGLE_GEMINI_BASE_URL-unset}}\" \"${{CC_SWITCH_LAUNCH_ENV_0-unset}}\" \"$@\" > '{}'\n",
-                out.display()
-            ),
-        )
-        .unwrap();
-        std::fs::set_permissions(bin.join("agy"), std::fs::Permissions::from_mode(0o755)).unwrap();
-
-        let launch = agy_key_launch();
-        let script = tmp.path().join("launcher.sh");
-        let env_file = tmp.path().join("env.sh");
-        std::fs::write(&env_file, unix_launch_env_file(&launch)).unwrap();
-        // Replace the final interactive shell with a no-op so the test returns.
-        let content =
-            build_unix_launcher_script(&launch, "/bin/bash", None, &script, Some(&env_file))
-                .replace("exec '/bin/bash'", "exit 0 #");
-        std::fs::write(&script, content).unwrap();
-        let status = std::process::Command::new("sh")
-            .arg(&script)
-            .env("HOME", &home)
-            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-            .env("GEMINI_API_KEY", "from-gui")
-            .status()
-            .unwrap();
-        assert!(status.success());
-        assert_eq!(
-            std::fs::read_to_string(&out).unwrap(),
-            "k'$(echo no)`x`%PATH%\nunset\nunset\n--gemini_dir=/home/me/.cc-switch/agy/relay\n"
-        );
-        assert!(
-            !env_file.exists(),
-            "env file is removed right after reading"
-        );
-        assert!(!script.exists());
     }
 
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -3215,32 +3351,6 @@ mod tests {
                 "credential data must never execute as cmd syntax"
             );
         }
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn claude_terminal_config_is_private() {
-        use std::os::unix::fs::PermissionsExt;
-        let launch = claude_terminal_launch(
-            &[("ANTHROPIC_AUTH_TOKEN".into(), "t".into())],
-            "p",
-            "P",
-            &Default::default(),
-        )
-        .unwrap();
-        let file = &launch.cleanup[0];
-        assert_eq!(
-            std::fs::metadata(file).unwrap().permissions().mode() & 0o777,
-            0o600
-        );
-        assert_eq!(
-            launch.args,
-            vec![
-                "--settings".to_string(),
-                file.to_string_lossy().into_owned()
-            ]
-        );
-        std::fs::remove_file(file).unwrap();
     }
 
     fn claude_runtime_test_provider(
@@ -3470,461 +3580,5 @@ mod tests {
                 r"C:\Users\张三\Temp\runtime system.md"
             ])
         );
-    }
-
-    #[test]
-    fn claude_terminal_config_writes_the_cards_own_model_picker() {
-        let read = |env: &[(&str, &str)]| {
-            let env: Vec<(String, String)> = env
-                .iter()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-            let launch =
-                claude_terminal_launch(&env, "p", "DeepSeek", &Default::default()).unwrap();
-            let file = &launch.cleanup[0];
-            let value: serde_json::Value =
-                serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
-            std::fs::remove_file(file).unwrap();
-            value["modelPicker"].clone()
-        };
-
-        // 卡上显式配了档位：只列这几档，`model` 写档位别名。
-        let picker = read(&[
-            ("ANTHROPIC_MODEL", "deepseek-v4-pro"),
-            ("ANTHROPIC_DEFAULT_OPUS_MODEL", "deepseek-v4-pro[1M]"),
-            ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "deepseek-v4-flash"),
-            ("ANTHROPIC_DEFAULT_HAIKU_MODEL_NAME", "Flash"),
-        ]);
-        assert_eq!(
-            picker,
-            serde_json::json!({
-                "replaceBuiltInOptions": true,
-                "options": [
-                    {
-                        "model": "opus",
-                        "label": "Opus · deepseek-v4-pro",
-                        "description": "DeepSeek · deepseek-v4-pro · 1M",
-                    },
-                    {
-                        "model": "haiku",
-                        "label": "Haiku · Flash",
-                        "description": "DeepSeek · deepseek-v4-flash",
-                    },
-                ],
-            })
-        );
-
-        // 一档都没配：空菜单，挡住用户级菜单，显示内置的。
-        let picker = read(&[("ANTHROPIC_MODEL", "deepseek-v4-pro")]);
-        assert_eq!(
-            picker,
-            serde_json::json!({ "replaceBuiltInOptions": false, "options": [] })
-        );
-    }
-
-    #[test]
-    fn claude_terminal_config_shadows_what_the_switch_clears() {
-        let drops = crate::services::provider::SwitchDrops {
-            env: serde_json::json!({
-                "ANTHROPIC_AUTH_TOKEN": "PROXY_MANAGED",
-                "ANTHROPIC_DEFAULT_OPUS_MODEL": "ccs-claude-kimi--k3[1M]",
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-            top: serde_json::json!({
-                "model": "ccs-claude-kimi--k3[1M]",
-                "modelOverrides": { "a": "b" },
-                "modelPicker": { "replaceBuiltInOptions": true, "options": [] },
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-        };
-        let launch = claude_terminal_launch(
-            &[
-                ("ANTHROPIC_API_KEY".into(), "sk".into()),
-                (
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL".into(),
-                    "deepseek-v4-pro".into(),
-                ),
-            ],
-            "p",
-            "DeepSeek",
-            &drops,
-        )
-        .unwrap();
-        let file = &launch.cleanup[0];
-        let value: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
-        std::fs::remove_file(file).unwrap();
-
-        // 卡上有的照写，没有的写空值挡住用户级的。
-        assert_eq!(value["env"]["ANTHROPIC_API_KEY"], "sk");
-        assert_eq!(
-            value["env"]["ANTHROPIC_DEFAULT_OPUS_MODEL"],
-            "deepseek-v4-pro"
-        );
-        assert_eq!(value["env"]["ANTHROPIC_AUTH_TOKEN"], "");
-        assert_eq!(value["model"], "");
-        assert_eq!(value["modelOverrides"], serde_json::json!({}));
-        // 菜单写卡自己的，不是空对象。
-        assert_eq!(value["modelPicker"]["options"][0]["model"], "opus");
-    }
-
-    #[test]
-    fn claude_terminal_config_without_drops_writes_only_the_card() {
-        let launch = claude_terminal_launch(
-            &[("ANTHROPIC_MODEL".into(), "deepseek-v4-pro".into())],
-            "p",
-            "DeepSeek",
-            &Default::default(),
-        )
-        .unwrap();
-        let file = &launch.cleanup[0];
-        let value: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
-        std::fs::remove_file(file).unwrap();
-        let keys: Vec<&String> = value.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["env", "modelPicker"]);
-        assert_eq!(
-            value["modelPicker"],
-            serde_json::json!({ "replaceBuiltInOptions": false, "options": [] })
-        );
-    }
-
-    #[test]
-    fn test_build_final_shell_cd_command() {
-        assert_eq!(build_final_shell_cd_command("/bin/zsh", None), "");
-        assert_eq!(
-            build_final_shell_cd_command("/bin/zsh", Some(Path::new("/tmp/project"))),
-            ""
-        );
-        assert_eq!(
-            build_final_shell_cd_command("/bin/bash", Some(Path::new("/tmp/project O'Brien"))),
-            "cd '/tmp/project O'\"'\"'Brien' || exit 1\n"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_get_user_shell_fallback() {
-        // $SHELL 未设置时应按平台 fallback
-        // 此测试验证 fallback 逻辑，但不验证环境变量值（取决于运行环境）
-        let shell = get_user_shell();
-        // 至少应返回一个合法的绝对路径
-        assert!(valid_user_shell_path(&shell));
-        // basename 应为合法 shell 名
-        let basename = shell.rsplit('/').next().unwrap_or("sh");
-        assert!(["sh", "bash", "zsh", "fish", "dash"].contains(&basename));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn test_valid_user_shell_path() {
-        let temp = tempfile::tempdir().expect("temp dir should be created");
-        let executable_zsh = temp.path().join("zsh");
-        std::fs::write(&executable_zsh, "#!/usr/bin/env sh\n")
-            .expect("shell fixture should be written");
-        set_test_executable(&executable_zsh, true);
-
-        let executable_fish_dir = temp.path().join("homebrew dir/bin");
-        std::fs::create_dir_all(&executable_fish_dir)
-            .expect("shell fixture directory should be created");
-        let executable_fish = executable_fish_dir.join("fish");
-        std::fs::write(&executable_fish, "#!/usr/bin/env sh\n")
-            .expect("shell fixture should be written");
-        set_test_executable(&executable_fish, true);
-
-        let non_executable_bash = temp.path().join("bash");
-        std::fs::write(&non_executable_bash, "#!/usr/bin/env sh\n")
-            .expect("shell fixture should be written");
-        set_test_executable(&non_executable_bash, false);
-
-        assert!(valid_user_shell_path(&executable_zsh.to_string_lossy()));
-        assert!(valid_user_shell_path(&executable_fish.to_string_lossy()));
-        assert!(!valid_user_shell_path(""));
-        assert!(!valid_user_shell_path("zsh"));
-        assert!(!valid_user_shell_path(
-            &temp.path().join("missing/zsh").to_string_lossy()
-        ));
-        assert!(!valid_user_shell_path(
-            &non_executable_bash.to_string_lossy()
-        ));
-        assert!(!valid_user_shell_path(
-            &temp.path().join("zsh; rm -rf /").to_string_lossy()
-        ));
-        assert!(!valid_user_shell_path(&format!(
-            "{}\n/bin/bash",
-            executable_zsh.to_string_lossy()
-        )));
-        assert!(!valid_user_shell_path("/usr/bin/powershell"));
-    }
-
-    #[test]
-    fn resolve_launch_cwd_accepts_existing_directory() {
-        let resolved =
-            resolve_launch_cwd(Some(std::env::temp_dir().to_string_lossy().into_owned()))
-                .expect("temp dir should resolve")
-                .expect("temp dir should be present");
-
-        assert!(resolved.is_dir());
-    }
-
-    #[test]
-    fn resolve_launch_cwd_rejects_missing_directory() {
-        let unique = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("clock should be after epoch")
-            .as_nanos();
-        let missing = std::env::temp_dir().join(format!("cc-switch-missing-{unique}"));
-
-        let error = resolve_launch_cwd(Some(missing.to_string_lossy().into_owned()))
-            .expect_err("missing directory should fail");
-
-        assert!(error.contains("目录不存在"));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn iterm2_applescript_cold_start_avoids_current_window_before_one_exists() {
-        let script = build_macos_iterm2_applescript(Path::new("/tmp/cc_switch_launcher.sh"));
-
-        let cold_start_branch = script
-            .split("else\n        activate")
-            .nth(1)
-            .expect("cold start branch should be present")
-            .split("    end if\n    tell current session")
-            .next()
-            .expect("cold start branch should end before writing command");
-
-        assert!(cold_start_branch.contains("repeat while (count of windows) = 0"));
-        assert!(cold_start_branch.contains("create window with default profile"));
-        assert!(!cold_start_branch.contains("tell current window"));
-        assert!(!cold_start_branch.contains("create tab with default profile"));
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn iterm2_applescript_keeps_new_tab_behavior_for_existing_windows() {
-        let script = build_macos_iterm2_applescript(Path::new("/tmp/cc_switch_launcher.sh"));
-
-        let running_branch = script
-            .split("if was_running then")
-            .nth(1)
-            .expect("already-running branch should be present")
-            .split("else\n        activate")
-            .next()
-            .expect("already-running branch should end before cold start branch");
-
-        assert!(running_branch.contains("if (count of windows) = 0 then"));
-        assert!(running_branch.contains("create window with default profile"));
-        assert!(running_branch.contains("create tab with default profile"));
-    }
-
-    /// Terminal `activate` creates a default empty window on cold start; `launch` does not.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn terminal_applescript_cold_start_uses_launch_before_do_script() {
-        let script = build_macos_terminal_applescript(Path::new("/tmp/cc_switch_launcher.sh"));
-
-        assert!(
-            script.contains(r#"set was_running to application "Terminal" is running"#),
-            "missing was_running detection:\n{script}"
-        );
-        // Cold launches avoid `activate` until after `do script`, so no default empty window is created first.
-        assert!(
-            script.contains(
-                "else\n        launch\n        do script launcher_script\n        activate"
-            ),
-            "cold start should launch before activating:\n{script}"
-        );
-        // Already-running launches should create a fresh session.
-        assert!(
-            script.contains(
-                "if was_running then\n        activate\n        do script launcher_script\n"
-            ),
-            "already-running branch should use bare do script:\n{script}"
-        );
-        assert!(
-            script.contains(r#"set launcher_script to "exec sh '/tmp/cc_switch_launcher.sh'""#),
-            "Terminal should replace the auto-created shell:\n{script}"
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn otty_launcher_command_executes_the_temporary_script() {
-        assert_eq!(
-            build_macos_dash_c_command(Path::new("/tmp/cc_switch_launcher.sh")),
-            "exec sh '/tmp/cc_switch_launcher.sh'"
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn otty_cli_candidates_include_bundle_and_installed_cli_locations() {
-        let candidates = macos_otty_cli_candidates();
-
-        assert!(candidates.contains(&PathBuf::from(
-            "/Applications/Otty.app/Contents/MacOS/otty-cli"
-        )));
-        assert!(candidates.contains(&PathBuf::from("/usr/local/bin/otty")));
-        assert!(candidates.contains(&PathBuf::from("/opt/homebrew/bin/otty")));
-    }
-
-    /// Restored windows should not receive the launcher command.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn terminal_applescript_does_not_hijack_restored_windows() {
-        let script = build_macos_terminal_applescript(Path::new("/tmp/cc_switch_launcher.sh"));
-        assert!(
-            !script.contains(" in window 1"),
-            "should not inject into an existing/restored Terminal window:\n{script}"
-        );
-        assert!(
-            !script.contains("count of windows"),
-            "should not infer restored-window safety from window count:\n{script}"
-        );
-    }
-
-    /// Ghostty cold starts use `initial-command`; warm starts use the scripting dictionary.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn ghostty_applescript_cold_start_uses_initial_command() {
-        let script = build_macos_ghostty_applescript(Path::new("/tmp/cc_switch_launcher.sh"));
-
-        // Warm launches execute through the AppleScript command property, not `open -na ... -e`.
-        assert!(
-            script.contains(r#"set launcher_command to "sh '/tmp/cc_switch_launcher.sh'""#),
-            "missing launcher_command:\n{script}"
-        );
-        assert!(script.contains("if was_running then"));
-        assert!(script.contains("new window with configuration {command:launcher_command}"));
-        assert!(
-            !script.contains(" --args -e"),
-            "should not execute through open -na -e:\n{script}"
-        );
-        // Cold launches make Ghostty's first default surface execute the launcher.
-        assert!(script.contains(r#"set was_running to application "Ghostty" is running"#));
-        assert!(
-            script.contains(
-                r#"do shell script "open -na Ghostty --args --quit-after-last-window-closed=true " & quoted form of ("--initial-command=" & launcher_command)"#
-            ),
-            "cold start should use initial-command:\n{script}"
-        );
-        assert!(
-            !script.contains("--initial-window=false"),
-            "should not rely on initial-window=false:\n{script}"
-        );
-        assert!(
-            !script.contains("delay 0.5"),
-            "should not rely on a fixed delay:\n{script}"
-        );
-        assert!(
-            !script.contains("old_ids"),
-            "should not track default windows for closing:\n{script}"
-        );
-        assert!(
-            !script.contains("close window"),
-            "should not close a default window:\n{script}"
-        );
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn dash_c_command_wraps_script_path_inside_quoted_arg() {
-        // The script path must stay inside the `-c` string, not as a bare argv.
-        let s = build_macos_dash_c_command(Path::new("/tmp/cc_switch_launcher_1.sh"));
-        assert_eq!(s, "exec sh '/tmp/cc_switch_launcher_1.sh'");
-
-        // Spaces and single quotes must stay shell-safe too.
-        let s2 = build_macos_dash_c_command(Path::new("/Users/me/it's dir/x.sh"));
-        assert_eq!(s2, r#"exec sh '/Users/me/it'"'"'s dir/x.sh'"#);
-    }
-
-    /// AppleScript launchers need both shell-path quoting and AppleScript string quoting.
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn applescript_builders_safely_quote_special_paths() {
-        // First shell-quote the path, then wrap the whole command as an AppleScript string.
-        let expected = r#""sh '/Users/me/it'\"'\"'s dir/x.sh'""#;
-        let p = Path::new("/Users/me/it's dir/x.sh");
-        assert_eq!(applescript_launcher_command(p), expected);
-        assert_eq!(
-            applescript_exec_launcher_command(p),
-            r#""exec sh '/Users/me/it'\"'\"'s dir/x.sh'""#
-        );
-        assert!(
-            build_macos_terminal_applescript(p)
-                .contains(r#""exec sh '/Users/me/it'\"'\"'s dir/x.sh'""#),
-            "Terminal did not quote safely"
-        );
-        assert!(
-            build_macos_iterm2_applescript(p)
-                .contains(r#""exec sh '/Users/me/it'\"'\"'s dir/x.sh'""#),
-            "iTerm2 did not quote safely"
-        );
-        assert!(
-            build_macos_ghostty_applescript(p).contains(expected),
-            "Ghostty did not keep the non-exec launcher"
-        );
-    }
-
-    #[test]
-    fn build_windows_cwd_command_str_uses_cd_for_drive_paths() {
-        let (command, env) = build_windows_cwd_command_str(r"C:\work\repo");
-
-        assert_eq!(command, "cd /d \"C:\\work\\repo\" || exit /b 1\r\n");
-        assert_eq!(env, None);
-    }
-
-    #[test]
-    fn build_windows_cwd_command_str_uses_pushd_for_unc_paths() {
-        let (command, _) = build_windows_cwd_command_str(r"\\wsl$\Ubuntu\home\coder\repo");
-
-        assert_eq!(
-            command,
-            "pushd \"\\\\wsl$\\Ubuntu\\home\\coder\\repo\" || exit /b 1\r\n"
-        );
-    }
-
-    #[test]
-    fn build_windows_cwd_command_str_escapes_batch_metacharacters() {
-        let (command, _) = build_windows_cwd_command_str(r"\\server\share\100%&(test)");
-
-        assert_eq!(
-            command,
-            "pushd \"\\\\server\\share\\100%%^&^(test^)\" || exit /b 1\r\n"
-        );
-    }
-
-    #[test]
-    fn build_windows_cwd_command_str_passes_non_ascii_paths_via_env() {
-        // cmd 按控制台代码页解码 .bat，中文路径不能写进文件（#8034）。
-        let path = r"C:\Users\林增文\项目";
-        let (command, env) = build_windows_cwd_command_str(path);
-
-        assert!(command.is_ascii(), "batch line must stay ASCII: {command}");
-        assert_eq!(
-            command,
-            "cd /d \"%CC_SWITCH_INTERNAL_CWD%\" || exit /b 1\r\nset \"CC_SWITCH_INTERNAL_CWD=\"\r\n"
-        );
-        assert_eq!(env.as_deref(), Some(path));
-
-        let (unc_command, unc_env) = build_windows_cwd_command_str(r"\\server\共享\repo");
-        assert!(unc_command.starts_with("pushd \"%CC_SWITCH_INTERNAL_CWD%\" || exit /b 1\r\n"));
-        assert_eq!(unc_env.as_deref(), Some(r"\\server\共享\repo"));
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn wsl_hermes_dashboard_runs_inside_the_distro_login_shell() {
-        let line = wsl_hermes_dashboard_line("Ubuntu-22.04").expect("valid WSL command line");
-        assert_eq!(
-            line,
-            r#"wsl.exe -d Ubuntu-22.04 -- sh -c "\"${SHELL:-sh}\" -lic 'hermes dashboard'""#
-        );
-        assert!(wsl_hermes_dashboard_line("Ubuntu & calc").is_err());
     }
 }

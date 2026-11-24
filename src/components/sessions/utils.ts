@@ -19,6 +19,7 @@ export const SESSION_APP_IDS = [
   "openclaw",
   "mcode",
   "kimi",
+  "codebuddy",
   "dsh",
   "agy",
   "copilot",
@@ -43,6 +44,7 @@ export const SESSION_SOURCE_PATHS: Record<SessionAppId, string[]> = {
   omp: ["~/.omp/agent/sessions"],
   mcode: ["~/.minimax"],
   kimi: ["~/.kimi-code/sessions"],
+  codebuddy: ["~/.codebuddy/projects"],
   dsh: ["~/.dsh/sessions/<project>/<session>/session.v*.jsonl[.zstd]"],
   workbuddy: ["~/.workbuddy/projects"],
   agy: [
@@ -89,6 +91,10 @@ const NATIVE_DELETE_HINTS: Record<
   workbuddy: {
     key: "workbuddy.deleteSessionHint",
     defaultValue: "请在 WorkBuddy 中删除",
+  },
+  codebuddy: {
+    key: "sessionManager.codebuddyDeleteHint",
+    defaultValue: "请在 CodeBuddy Code 中删除",
   },
 };
 

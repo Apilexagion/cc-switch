@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -9,7 +11,6 @@ import {
 } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useQueryClient } from "@tanstack/react-query";
-import i18n from "i18next";
 import {
   AlertTriangle,
   Check,
@@ -43,12 +44,26 @@ import {
 } from "./api";
 import { aimingAt, type Point } from "./menuAim";
 import { usePanelTheme } from "./usePanelTheme";
-import { UsageTab } from "./UsageTab";
+
+const LANGUAGE_KEY = "language";
+
+const LazyUsageTab = lazy(async () => {
+  const [{ i18nReady, syncLanguageFromSettings }, { UsageTab }] =
+    await Promise.all([import("@/i18n"), import("./UsageTab")]);
+  await i18nReady;
+  try {
+    const stored = window.localStorage.getItem(LANGUAGE_KEY);
+    if (stored) {
+      await syncLanguageFromSettings(stored);
+    }
+  } catch {
+    // 读不到沿用当前语言
+  }
+  return { default: UsageTab };
+});
 
 type Tab = "config" | "usage";
 const TAB_KEY = "cc-switch-tray-tab";
-/** 主界面保存语言用的键 */
-const LANGUAGE_KEY = "language";
 const MAIN_MAX_HEIGHT = 620;
 /** 使用固定画布时，窗口在一次弹出里的最大高度 */
 const CANVAS_MAX_HEIGHT = 760;
@@ -78,17 +93,6 @@ function readTab(): Tab {
       : "config";
   } catch {
     return "config";
-  }
-}
-
-function syncLanguage() {
-  try {
-    const language = window.localStorage.getItem(LANGUAGE_KEY);
-    if (language && language !== i18n.language) {
-      void i18n.changeLanguage(language);
-    }
-  } catch {
-    // 读不到沿用当前语言
   }
 }
 
@@ -619,7 +623,18 @@ export function TrayPanel() {
       shownSeq.current = next.seq;
       const request = ++showRequest.current;
       setPanelVisible(true);
-      syncLanguage();
+      if (readTab() === "usage") {
+        try {
+          const stored = window.localStorage.getItem(LANGUAGE_KEY);
+          if (stored) {
+            void import("@/i18n").then(({ syncLanguageFromSettings }) =>
+              syncLanguageFromSettings(stored),
+            );
+          }
+        } catch {
+          // 读不到沿用当前语言
+        }
+      }
       setOpenApp(null);
       setQuery("");
       const cold = !lastState.current;
@@ -661,6 +676,9 @@ export function TrayPanel() {
       const offShow = await listen<PanelPlacement>(SHOW_EVENT, (event) => {
         void begin(event.payload);
       });
+      const offHide = await listen(HIDE_EVENT, () => {
+        setPanelVisible(false);
+      });
       const offChanged = await listen(CHANGED_EVENT, () => void load());
       const offHide = await listen(HIDE_EVENT, () => {
         showRequest.current += 1;
@@ -670,11 +688,12 @@ export function TrayPanel() {
       });
       if (disposed) {
         offShow();
+        offHide();
         offChanged();
         offHide();
         return;
       }
-      offs.push(offShow, offChanged, offHide);
+      offs.push(offShow, offHide, offChanged);
       // 第一次弹出时窗口是新建的，事件可能早于这里开始监听
       const pending = await trayPanelApi.placement();
       if (pending && !disposed) void begin(pending);
@@ -1151,10 +1170,18 @@ export function TrayPanel() {
               ))}
             </div>
           ) : (
-            <UsageTab
-              refreshKey={shownCount}
-              visible={panelVisible && tab === "usage"}
-            />
+            <Suspense
+              fallback={
+                <div className="flex h-40 items-center justify-center text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                </div>
+              }
+            >
+              <LazyUsageTab
+                refreshKey={shownCount}
+                visible={panelVisible && tab === "usage"}
+              />
+            </Suspense>
           )}
         </div>
 

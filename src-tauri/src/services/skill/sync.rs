@@ -60,6 +60,7 @@ impl SkillService {
                 | AppType::Omp
                 | AppType::Copilot
                 | AppType::WorkBuddy
+                | AppType::Codebuddy
         ) {
             return Ok(());
         }
@@ -249,6 +250,7 @@ impl SkillService {
                 | AppType::Omp
                 | AppType::Copilot
                 | AppType::WorkBuddy
+                | AppType::Codebuddy
         ) && (dest.exists() || Self::is_symlink(&dest))
         {
             Self::ensure_pi_skill_destination_matches(&source, &dest, &directory)?;
@@ -457,6 +459,7 @@ impl SkillService {
                     | AppType::Omp
                     | AppType::Copilot
                     | AppType::WorkBuddy
+                    | AppType::Codebuddy
             ) {
                 let source = ssot_dir.join(&directory);
                 Self::ensure_pi_skill_destination_matches(&source, &skill_path, &directory)?;
@@ -570,7 +573,7 @@ impl SkillService {
             .map(|skill| (skill.directory.to_lowercase(), skill))
             .collect();
 
-        // Unselected MCode, Agy, Kimi, Copilot and WorkBuddy directories may have been installed outside CC Switch.
+        // Unselected MCode, Agy, Kimi, Copilot, WorkBuddy and CodeBuddy directories may have been installed outside CC Switch.
         // Explicit disable/uninstall handles removal of managed deployments.
         if app_dir.exists()
             && !matches!(
@@ -581,6 +584,7 @@ impl SkillService {
                     | AppType::Dsh
                     | AppType::Copilot
                     | AppType::WorkBuddy
+                    | AppType::Codebuddy
             )
         {
             for entry in fs::read_dir(&app_dir)? {

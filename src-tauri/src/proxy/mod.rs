@@ -49,6 +49,7 @@ pub mod thinking_rectifier;
 pub(crate) mod tool_media;
 pub(crate) mod types;
 pub(crate) mod upstream_guard;
+pub(crate) mod upstream_pool;
 pub mod usage;
 
 #[cfg(test)]
