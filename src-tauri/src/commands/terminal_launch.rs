@@ -2662,21 +2662,27 @@ mod tests {
 
     #[test]
     fn windows_launch_env_scopes_values_and_carries_non_ascii_paths() {
-        let (lines, carried) = build_windows_launch_env(&agy_key_launch());
-        assert_eq!(
-            lines,
-            "set \"GEMINI_API_KEY=k'$(echo no)`x`%%PATH%%\"\r\n\
-             set \"GOOGLE_GEMINI_BASE_URL=\"\r\n\
-             set \"CC_SWITCH_AGY_DIR=%CC_SWITCH_INTERNAL_ENV_2%\"\r\n\
-             set \"CC_SWITCH_INTERNAL_ENV_2=\"\r\n"
-        );
+        let launch = agy_key_launch();
+        let (lines, carried) = build_windows_launch_env(&launch);
+        assert_eq!(lines, "set \"GOOGLE_GEMINI_BASE_URL=\"\r\n");
         assert_eq!(
             carried,
-            vec![(
-                "CC_SWITCH_INTERNAL_ENV_2".to_string(),
-                r"C:\Users\张三\.cc-switch\agy\relay".to_string()
-            )]
+            vec![
+                (
+                    "CC_SWITCH_INTERNAL_ENV_0".to_string(),
+                    "k'$(echo no)`x`%PATH%".to_string()
+                ),
+                (
+                    "CC_SWITCH_INTERNAL_ENV_2".to_string(),
+                    r"C:\Users\张三\.cc-switch\agy\relay".to_string()
+                )
+            ]
         );
+        let script = windows_env_launch_script(&launch);
+        for (_, value) in carried {
+            assert!(!script.contains(&value));
+        }
+        assert!(script.contains("GetEnvironmentVariable('CC_SWITCH_INTERNAL_ENV_2', 'Process')"));
     }
 
     #[cfg(unix)]

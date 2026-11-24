@@ -2109,6 +2109,18 @@ impl Database {
             Self::add_column_if_missing(
                 conn,
                 "skill_repos",
+                "branch",
+                "TEXT NOT NULL DEFAULT 'main'",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "skill_repos",
+                "enabled",
+                "BOOLEAN NOT NULL DEFAULT 1",
+            )?;
+            Self::add_column_if_missing(
+                conn,
+                "skill_repos",
                 "repo_url",
                 "TEXT NOT NULL DEFAULT ''",
             )?;
