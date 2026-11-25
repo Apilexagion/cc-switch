@@ -112,18 +112,31 @@ pub async fn list_mcp_tools(
     app: String,
 ) -> Result<serde_json::Value, String> {
     use crate::services::mcp_tool_policy as policy;
-    let field = policy::field(&app).map_err(|e| e.to_string())?;
     let mut rows = state.db.get_all_mcp_servers().map_err(|e| e.to_string())?;
     let server = rows.shift_remove(&id).ok_or("Unknown MCP server")?;
-    let native = server
-        .server
-        .get(field)
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let disabled = policy::listed(&app, &id).map_err(|e| e.to_string())?;
+    let (disabled, native, all) = if app == "claude" {
+        policy::claude_view(&id).map_err(|e| e.to_string())?
+    } else {
+        let field = policy::field(&app).map_err(|e| e.to_string())?;
+        let native = server
+            .server
+            .get(field)
+            .and_then(serde_json::Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect();
+        (
+            policy::listed(&app, &id)
+                .map_err(|e| e.to_string())?
+                .into_iter()
+                .collect(),
+            native,
+            false,
+        )
+    };
     let names = crate::services::mcp_connectivity::tool_names(server.server).await?;
-    Ok(serde_json::json!({"names":names,"disabled":disabled,"native":native}))
+    Ok(serde_json::json!({"names":names,"disabled":disabled,"native":native,"all":all}))
 }
 #[tauri::command]
 pub async fn set_mcp_tool_blocked(
@@ -134,6 +147,7 @@ pub async fn set_mcp_tool_blocked(
     blocked: bool,
 ) -> Result<(), String> {
     let ty = match app.as_str() {
+        "claude" => AppType::Claude,
         "codex" => AppType::Codex,
         "gemini" => AppType::Gemini,
         _ => return Err("Unsupported native tool policy".into()),
@@ -143,6 +157,10 @@ pub async fn set_mcp_tool_blocked(
         .map_err(|e| e.to_string())?;
     let servers = state.db.get_all_mcp_servers().map_err(|e| e.to_string())?;
     let s = servers.get(&id).ok_or("Unknown MCP server")?;
+    if app == "claude" {
+        return crate::services::mcp_tool_policy::change_claude(&state.db, &id, &name, blocked)
+            .map_err(|e| e.to_string());
+    }
     crate::services::mcp_tool_policy::change(&app, &id, &name, blocked, || {
         if !s.apps.is_enabled_for(&ty) {
             return Ok(());

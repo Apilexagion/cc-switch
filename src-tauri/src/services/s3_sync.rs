@@ -38,7 +38,7 @@ pub async fn upload(
     db: &crate::database::Database,
     settings: &mut S3SyncSettings,
 ) -> Result<Value, AppError> {
-    upload_checked(db, settings, None).await
+    upload_checked(db, settings, None, true).await
 }
 pub(crate) fn destination(s: &S3SyncSettings) -> String {
     sha256_hex(
@@ -59,11 +59,17 @@ pub(crate) async fn upload_checked(
     db: &crate::database::Database,
     settings: &mut S3SyncSettings,
     token: Option<&str>,
+    automatic: bool,
 ) -> Result<Value, AppError> {
     settings.validate()?;
     let creds = creds_for(settings);
 
     let snapshot = build_local_snapshot(db)?;
+    if automatic
+        && crate::services::sync_review::held_after_undo(&snapshot.db_sql, &snapshot.skills_zip)
+    {
+        return Ok(serde_json::json!({"status":"unchanged"}));
+    }
 
     let manifest_key = s3_key(settings, REMOTE_MANIFEST);
     let remote = s3::get_object(&creds, &manifest_key, MAX_MANIFEST_BYTES).await?;

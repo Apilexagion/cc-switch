@@ -1,3 +1,4 @@
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -503,6 +504,7 @@ export function SessionManagerPage({
     [copyText],
   );
 
+  const [carryTarget, setCarryTarget] = useState<SessionMeta | null>(null);
   const carrying = useRef(false);
   const carrySession = async (session: SessionMeta) => {
     if (carrying.current || !session.sourcePath || !canResumeSession(session))
@@ -877,7 +879,7 @@ export function SessionManagerPage({
           !!session.sourcePath &&
           !!session.projectDir &&
           (session.providerId === "codex" || session.providerId === "claude")
-            ? () => void carrySession(session)
+            ? () => setCarryTarget(session)
             : undefined
         }
         onLaunch={() => void handleLaunch(session)}
@@ -1766,6 +1768,20 @@ export function SessionManagerPage({
         </div>
       </div>
 
+      <ConfirmDialog
+        isOpen={!!carryTarget}
+        variant="info"
+        title={t("magpiePorts.carry", {
+          target:
+            carryTarget?.providerId === "claude" ? "Codex" : "Claude Code",
+        })}
+        message={t("magpiePorts.carryNote")}
+        onCancel={() => setCarryTarget(null)}
+        onConfirm={() => {
+          if (carryTarget) void carrySession(carryTarget);
+          setCarryTarget(null);
+        }}
+      />
       <SessionDeleteDialog
         targets={deleteTargets}
         pending={isDeleting}

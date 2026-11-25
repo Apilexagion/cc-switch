@@ -57,7 +57,7 @@ impl SyncBackend for S3Backend {
         settings: &'a mut S3SyncSettings,
         token: Option<&'a str>,
     ) -> Result<Value, AppError> {
-        s3_sync_service::upload_checked(db, settings, token).await
+        s3_sync_service::upload_checked(db, settings, token, false).await
     }
     async fn download<'a>(
         db: &'a Database,

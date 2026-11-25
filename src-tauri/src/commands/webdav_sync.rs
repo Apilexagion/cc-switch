@@ -60,7 +60,7 @@ impl SyncBackend for WebDavBackend {
         settings: &'a mut WebDavSyncSettings,
         token: Option<&'a str>,
     ) -> Result<Value, AppError> {
-        webdav_sync_service::upload_checked(db, settings, token).await
+        webdav_sync_service::upload_checked(db, settings, token, false).await
     }
     async fn download<'a>(
         db: &'a Database,

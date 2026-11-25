@@ -290,9 +290,10 @@ impl ProviderRouter {
         app_type: &str,
         strategy: RoutingStrategy,
         providers: &mut [Provider],
-    ) {
+    ) -> &'static str {
+        let mut reason = strategy.as_str();
         if providers.len() < 2 {
-            return;
+            return "single";
         }
 
         match strategy {
@@ -322,6 +323,7 @@ impl ProviderRouter {
                 // 读取每个候选的额度视图（只读，不触发任何缓存失效/网络请求）。
                 let views = self.collect_quota_views(app_type, providers);
                 if views.is_empty() {
+                    reason = "quotaUnknown";
                     // 全部额度未知 → 不重排，行为与 order 完全一致。
                     log::debug!(
                         "[{app_type}] 额度感知路由 {} 无可用额度快照，本轮回落 order",
@@ -346,6 +348,7 @@ impl ProviderRouter {
                 .entry(format!("{app_type}:{}", primary.id))
                 .or_insert(0) += 1;
         }
+        reason
     }
 
     /// 为额度感知路由收集候选的额度视图（只读）。
@@ -534,6 +537,24 @@ impl ProviderRouter {
         auto_failover_enabled: bool,
         session_id: Option<&str>,
     ) -> Result<Vec<Provider>, AppError> {
+        self.select_providers_explained(
+            app_type,
+            current_provider,
+            auto_failover_enabled,
+            session_id,
+            |_, _| {},
+        )
+        .await
+    }
+
+    pub(crate) async fn select_providers_explained(
+        &self,
+        app_type: &AppType,
+        current_provider: Option<Provider>,
+        auto_failover_enabled: bool,
+        session_id: Option<&str>,
+        mut note: impl FnMut(&Provider, &'static str) + Send,
+    ) -> Result<Vec<Provider>, AppError> {
         let mut result = Vec::new();
         let mut total_providers = 0usize;
         let mut circuit_open_count = 0usize;
@@ -547,7 +568,9 @@ impl ProviderRouter {
             // Keep it as a single route even if an old failover setting remains
             // enabled; retrying would reuse its inbound token for another card.
             total_providers = 1;
-            result.push(current_provider.expect("checked above"));
+            let current = current_provider.expect("checked above");
+            note(&current, "officialPin");
+            result.push(current);
         } else if auto_failover_enabled {
             // 故障转移开启：仅按队列顺序依次尝试（P1 → P2 → ...）
             // 使用 DAO 返回的排序结果，确保和前端展示一致
@@ -558,6 +581,7 @@ impl ProviderRouter {
                 .await?;
             for provider in providers {
                 if !provider_supports_failover(app_type, &provider) {
+                    note(&provider, "accountBoundary");
                     continue;
                 }
                 total_providers += 1;
@@ -569,6 +593,7 @@ impl ProviderRouter {
                 if breaker.is_available().await {
                     result.push(provider);
                 } else {
+                    note(&provider, "circuit");
                     circuit_open_count += 1;
                 }
             }
@@ -604,6 +629,7 @@ impl ProviderRouter {
             };
 
             if pinned {
+                note(&result[0], "sticky");
                 log::debug!("[{app_type}] 会话粘性命中，主路由固定为 {}", result[0].id);
             } else {
                 let strategy = self
@@ -618,7 +644,8 @@ impl ProviderRouter {
                         result.len()
                     );
                 }
-                self.apply_routing_strategy(app_type.as_str(), strategy, &mut result);
+                let reason = self.apply_routing_strategy(app_type.as_str(), strategy, &mut result);
+                note(&result[0], reason);
             }
         }
 

@@ -52,6 +52,7 @@ export function ToolPicker({ id }: { id: string }) {
           }}
         >
           <option value="codex">Codex</option>
+          <option value="claude">Claude Code</option>
           <option value="gemini">Gemini CLI</option>
         </select>{" "}
         <Button
@@ -74,9 +75,16 @@ export function ToolPicker({ id }: { id: string }) {
                     <input
                       type="checkbox"
                       checked={
-                        !list.disabled.includes(n) && !list.native.includes(n)
+                        !list.all &&
+                        !list.disabled.includes(n) &&
+                        !list.native.includes(n)
                       }
-                      disabled={list.native.includes(n)}
+                      disabled={
+                        list.all ||
+                        list.native.includes(n) ||
+                        (app === "claude" &&
+                          (!/^[A-Za-z0-9_-]+$/.test(n) || n.includes("__")))
+                      }
                       onChange={(e) => void change(n, !e.target.checked)}
                     />{" "}
                     {n}

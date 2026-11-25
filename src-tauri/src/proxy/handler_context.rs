@@ -280,6 +280,8 @@ impl RequestContext {
         );
 
         let is_stack = stack.is_some();
+        let tracing = state.config.try_read().is_ok_and(|c| c.enable_logging);
+        let mut observations = Vec::new();
         let mut selection_reason = if is_stack { "stack" } else { "current" };
         let (mut provider, mut providers, current_provider_id, request_model) = match stack {
             Some(target) => {
@@ -398,11 +400,19 @@ impl RequestContext {
                     };
                     let mut selected = state
                         .provider_router
-                        .select_providers_with_current(
+                        .select_providers_explained(
                             &app_type,
                             routing_current,
                             app_config.auto_failover_enabled,
                             sticky_session,
+                            |p, reason| {
+                                if tracing && observations.len() < 24 {
+                                    observations.push((
+                                        p.name.chars().take(128).collect::<String>(),
+                                        reason,
+                                    ));
+                                }
+                            },
                         )
                         .await
                         .map_err(|e| match e {
@@ -534,6 +544,9 @@ impl RequestContext {
                 crate::proxy::diagnostics::DiagnosticHandle::new(capture, pii_redaction.clone())
             });
         if let Some(d) = &diagnostics {
+            for (name, reason) in observations {
+                d.route(&name, reason);
+            }
             d.route(&provider.name, selection_reason);
         }
         Ok(Self {

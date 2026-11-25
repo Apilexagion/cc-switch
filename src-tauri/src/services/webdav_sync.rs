@@ -58,7 +58,7 @@ pub async fn upload(
     db: &crate::database::Database,
     settings: &mut WebDavSyncSettings,
 ) -> Result<Value, AppError> {
-    upload_checked(db, settings, None).await
+    upload_checked(db, settings, None, true).await
 }
 pub(crate) fn destination(s: &WebDavSyncSettings) -> String {
     sha256_hex(
@@ -71,13 +71,18 @@ pub(crate) async fn upload_checked(
     db: &crate::database::Database,
     settings: &mut WebDavSyncSettings,
     token: Option<&str>,
+    automatic: bool,
 ) -> Result<Value, AppError> {
     settings.validate()?;
     let auth = auth_for(settings);
     let dir_segs = remote_dir_segments(settings, RemoteLayout::Current);
-    ensure_remote_directories(&settings.base_url, &dir_segs, &auth).await?;
 
     let snapshot = build_local_snapshot(db)?;
+    if automatic
+        && crate::services::sync_review::held_after_undo(&snapshot.db_sql, &snapshot.skills_zip)
+    {
+        return Ok(serde_json::json!({"status":"unchanged"}));
+    }
 
     let manifest_url = remote_file_url(settings, RemoteLayout::Current, REMOTE_MANIFEST)?;
     let remote = get_bytes(&manifest_url, &auth, MAX_MANIFEST_BYTES).await?;
@@ -111,6 +116,7 @@ pub(crate) async fn upload_checked(
         }
     }
 
+    ensure_remote_directories(&settings.base_url, &dir_segs, &auth).await?;
     let mut snapshot_dir = dir_segs;
     snapshot_dir.extend(["snapshots".to_string(), snapshot.snapshot_id.clone()]);
     ensure_remote_directories(&settings.base_url, &snapshot_dir, &auth).await?;

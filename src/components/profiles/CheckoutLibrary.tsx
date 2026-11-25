@@ -111,6 +111,11 @@ export function CheckoutLibrary({ profiles }: { profiles: Profile[] }) {
         </Button>
         {preview && (
           <>
+            <p>
+              {t("magpiePorts.previous")}:{" "}
+              {profiles.find((p) => p.id === preview.previousProfile)?.name ??
+                "—"}
+            </p>
             <ul className="max-h-32 overflow-auto">
               {preview.changes.map((r) => (
                 <li key={r.checkout + "/" + r.file}>
@@ -121,7 +126,11 @@ export function CheckoutLibrary({ profiles }: { profiles: Profile[] }) {
             <Button
               size="compact"
               variant="neutral"
-              disabled={!preview.changes.length}
+              disabled={
+                !preview.changes.length &&
+                !b.profile &&
+                !preview.previousProfile
+              }
               onClick={() => void run(true)}
             >
               {t("magpiePorts.apply")}

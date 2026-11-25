@@ -22,6 +22,20 @@ struct UndoPoint {
     directory: tempfile::TempDir,
     post: String,
 }
+// A change queued *before* undo may acquire the sync lock afterwards. Do not
+// let that queued auto upload publish exactly the state just restored locally.
+static LOCAL_UNDO: Mutex<Option<String>> = Mutex::new(None);
+pub(crate) fn held_after_undo(sql: &[u8], zip: &[u8]) -> bool {
+    let mut slot = LOCAL_UNDO.lock_recover();
+    let Some(held) = slot.as_deref() else {
+        return false;
+    };
+    if key(sql, zip) == held {
+        return true;
+    }
+    *slot = None;
+    false
+}
 static UNDO: Mutex<Option<UndoPoint>> = Mutex::new(None);
 fn err(e: impl std::fmt::Display) -> AppError {
     AppError::Message(e.to_string())
@@ -220,18 +234,44 @@ pub(crate) fn undo(db: &Database) -> Result<(), AppError> {
     }
     let sql = fs::read(u.directory.path().join("database.sql")).map_err(err)?;
     let zip = fs::read(u.directory.path().join("skills.zip")).map_err(err)?;
-    apply_snapshot(
+    let restored = apply_snapshot(
         db,
         &sql,
         &zip,
         Some((&sql_hash(&now.db_sql), &sha256_hex(&now.skills_zip))),
     )?;
+    *LOCAL_UNDO.lock_recover() = Some(restored.unwrap_or_else(|| key(&sql, &zip)));
     *slot = None;
     Ok(())
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn stale_review_cannot_replace_later_database_edits() {
+        let db = Database::memory().unwrap();
+        let before = db.export_sql_string_for_sync().unwrap();
+        let expected = sql_hash(before.as_bytes());
+        db.set_setting("sync_test_local_edit", "keep").unwrap();
+        assert!(db.import_reviewed_for_sync(&before, &expected).is_err());
+        assert_eq!(
+            db.get_setting("sync_test_local_edit").unwrap().as_deref(),
+            Some("keep")
+        );
+    }
+    #[test]
+    fn receipts_bind_direction_location_and_remote_manifest() {
+        let t = review_token(b"sql", b"zip", b"remote", "bucket-A", true);
+        assert_ne!(
+            t,
+            review_token(b"sql", b"zip", b"remote", "bucket-A", false)
+        );
+        assert_ne!(t, review_token(b"sql", b"zip", b"remote", "bucket-B", true));
+        assert_ne!(
+            t,
+            review_token(b"sql", b"zip", b"changed", "bucket-A", true)
+        );
+    }
     #[test]
     fn token_ignores_only_the_generated_header() {
         let a = "-- CC Switch SQLite 导出\n-- 生成时间: 1\nSELECT 1";

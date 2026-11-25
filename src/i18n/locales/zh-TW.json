@@ -6119,7 +6119,7 @@
     "preview": "预览差异",
     "apply": "应用已预览的改动",
     "toolPolicy": "按客户端启停工具",
-    "toolNote": "手动发现会连接已保存的服务，stdio 服务会启动进程；不会调用任何工具。变更立即保存到本机。仅对 Codex / Gemini CLI 生效；灰色项由原配置禁用。",
+    "toolNote": "手动发现会连接已保存的服务，stdio 服务会启动进程；不会调用工具。更改立即作用于本机的 Claude Code、Codex 或 Gemini CLI。原配置禁用的工具不能在这里放开，客户端可能需要重启。",
     "listTools": "连接并列出工具",
     "routing": "实际选路记录",
     "footprint": "发往上游的上下文构成（估算字节，非计费 token）",
@@ -6139,6 +6139,17 @@
     "route_accountBoundary": "不能跨官方账号继续",
     "route_circuit": "熔断器未放行",
     "route_retryable": "上游失败，继续尝试队列",
-    "route_inputLimit": "上游拒绝输入长度，切换候选"
+    "route_inputLimit": "上游拒绝输入长度，切换候选",
+    "previous": "此工作树上次绑定的档案",
+    "carryNote": "将在另一个客户端创建独立的本地会话。复制主线用户和助手文字，工具以历史记录显示；不复制图片、隐藏推理或旧系统指令。不会启动终端或发送请求，继续后由目标客户端发送上下文。",
+    "route_single": "只有一个可用候选",
+    "route_order": "按队列优先级选择",
+    "route_usage": "最少使用优先",
+    "route_rotate": "轮询选中",
+    "route_smart": "按额度和重置时间排序",
+    "route_pace": "按剩余额度配速排序",
+    "route_quotaUnknown": "没有可用额度数据，退回队列顺序",
+    "route_officialPin": "保持已选官方账号",
+    "route_sticky": "保持此会话上次成功的供应商"
   }
 }

@@ -25,7 +25,7 @@ static LOCK: Mutex<()> = Mutex::new(());
 fn er(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Binding {
     pub root: PathBuf,
@@ -35,6 +35,11 @@ pub struct Binding {
     pub skill_index: bool,
 }
 type Owned = BTreeMap<PathBuf, BTreeMap<PathBuf, String>>;
+#[derive(Default, Deserialize, Serialize)]
+struct Receipt {
+    binding: Option<Binding>,
+    files: Owned,
+}
 fn git(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let o = Command::new("git")
         .arg("--no-optional-locks")
@@ -78,9 +83,24 @@ fn checkout_roots(root: &Path) -> Result<(PathBuf, BTreeSet<PathBuf>), String> {
 }
 fn safe_rel(p: &Path) -> bool {
     !p.as_os_str().is_empty()
-        && p.components().all(
-            |c| matches!(c,Component::Normal(v) if !v.eq_ignore_ascii_case(OsStr::new(".git"))),
-        )
+        && p.components().all(|c| {
+            let Component::Normal(v) = c else {
+                return false;
+            };
+            let Some(s) = v.to_str() else { return false };
+            if s.eq_ignore_ascii_case(".git")
+                || s.contains([':', '\\', '\n', '\r'])
+                || s.ends_with(['.', ' '])
+            {
+                return false;
+            }
+            let base = s.split('.').next().unwrap_or("").to_ascii_uppercase();
+            !matches!(base.as_str(), "CON" | "NUL" | "PRN" | "AUX")
+                && !["COM", "LPT"].iter().any(|prefix| {
+                    base.strip_prefix(prefix)
+                        .is_some_and(|n| n.len() == 1 && n.as_bytes()[0].is_ascii_digit())
+                })
+        })
 }
 fn safe_path(root: &Path, rel: &Path, create: bool) -> Result<PathBuf, String> {
     if !safe_rel(rel) {
@@ -235,10 +255,7 @@ fn assets(db: &Database, b: &Binding, app: &AppType) -> Result<Assets, String> {
     });
     let mut index=String::from("---\nname: cc-switch-skills\ndescription: Find project skills by name or description, then read their SKILL.md only when needed.\n---\n\n# Project skills\n");
     if !from.is_empty() {
-        let source = SkillService::get_ssot_dir()
-            .map_err(er)?
-            .canonicalize()
-            .map_err(er)?;
+        let source = SkillService::ssot_path().canonicalize().map_err(er)?;
         for id in from {
             let sk = skills
                 .get(id)
@@ -284,6 +301,14 @@ fn write_new(path: &Path, data: &[u8]) -> Result<(), String> {
     Ok(())
 }
 pub fn project(db: &Database, b: Binding, token: Option<&str>) -> Result<Value, String> {
+    project_in(db, b, token, crate::live::engine::DeviceStore::for_device())
+}
+fn project_in(
+    db: &Database,
+    b: Binding,
+    token: Option<&str>,
+    device: crate::live::engine::DeviceStore,
+) -> Result<Value, String> {
     let _guard = LOCK.lock_recover();
     let app = match b.app.as_str() {
         "claude" => AppType::Claude,
@@ -291,22 +316,23 @@ pub fn project(db: &Database, b: Binding, token: Option<&str>) -> Result<Value, 
         _ => return Err("Only Claude Code and Codex have project projections".into()),
     };
     let (root, worktrees) = checkout_roots(&b.root)?;
-    let device = crate::live::engine::DeviceStore::for_device();
+
     let receipt = device.file(&format!(
         "checkout-{}.json",
         sha256_hex(format!("{}:{}", b.app, root.display()).as_bytes())
     ));
-    let mut owned: Owned = match fs::read(&receipt) {
+    let mut saved: Receipt = match fs::read(&receipt) {
         Ok(buf) => serde_json::from_slice(&buf).map_err(|_| "Invalid checkout receipt")?,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Owned::new(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Receipt::default(),
         Err(e) => return Err(er(e)),
     };
+    let previous_profile = saved.binding.as_ref().and_then(|s| s.profile.clone());
     let data = assets(db, &b, &app)?;
     let mut changes = Vec::new();
     let mut pending = Vec::new();
     for tree in &worktrees {
         let selected = b.profile.is_some() && (b.all_worktrees || tree == &root);
-        let old = owned.get(tree).cloned().unwrap_or_default();
+        let old = saved.files.get(tree).cloned().unwrap_or_default();
         let mut keys: BTreeSet<&PathBuf> = old.keys().collect();
         if selected {
             keys.extend(data.files.keys());
@@ -348,6 +374,7 @@ pub fn project(db: &Database, b: Binding, token: Option<&str>) -> Result<Value, 
         if token != fingerprint {
             return Err("The checkout plan changed; preview again".into());
         }
+        saved.binding = b.profile.as_ref().map(|_| b.clone());
         // Record each successful file before moving on, so an interrupted batch
         // can be retried/removed without claiming an untouched foreign file.
         for (tree, key, was, after) in pending {
@@ -355,7 +382,7 @@ pub fn project(db: &Database, b: Binding, token: Option<&str>) -> Result<Value, 
             if content_hash(&path)? != was {
                 return Err("Checkout file changed since preview".into());
             }
-            let record = owned.entry(tree).or_default();
+            let record = saved.files.entry(tree).or_default();
             if let Some(hash) = after {
                 let bytes = &data.files[&key];
                 if was.is_none() {
@@ -370,15 +397,93 @@ pub fn project(db: &Database, b: Binding, token: Option<&str>) -> Result<Value, 
                 }
                 record.remove(&key);
             }
-            crate::config::atomic_write_private(&receipt, &serde_json::to_vec(&owned).map_err(er)?)
+            crate::config::atomic_write_private(&receipt, &serde_json::to_vec(&saved).map_err(er)?)
                 .map_err(er)?;
         }
+        crate::config::atomic_write_private(&receipt, &serde_json::to_vec(&saved).map_err(er)?)
+            .map_err(er)?;
     }
-    Ok(json!({"token":fingerprint,"changes":changes,"checkouts":worktrees}))
+    Ok(
+        json!({"token":fingerprint,"changes":changes,"checkouts":worktrees,"previousProfile":previous_profile}),
+    )
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn binding_is_scoped_to_checked_out_trees_and_never_overwrites_manual_edits() {
+        let temp = tempfile::tempdir().unwrap();
+        let main = temp.path().join("first");
+        let other = temp.path().join("second");
+        fs::create_dir(&main).unwrap();
+        git(&main, &["init", "-q"]).unwrap();
+        git(
+            &main,
+            &[
+                "-c",
+                "user.name=fixture",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "fixture",
+            ],
+        )
+        .unwrap();
+        git(
+            &main,
+            &["worktree", "add", "-q", "--detach", other.to_str().unwrap()],
+        )
+        .unwrap();
+        let db = Database::memory().unwrap();
+        let p = serde_json::from_value(
+            json!({"id":"x","name":"x","content":"project instructions","enabled":false}),
+        )
+        .unwrap();
+        db.save_prompt(&AppType::Codex, &p).unwrap();
+        let payload = json!({"mcp":{"codex":[]},"prompts":{"codex":"x"}});
+        db.save_profile(&crate::database::Profile {
+            id: "p".into(),
+            name: "P".into(),
+            payload: payload.to_string(),
+            sort_order: None,
+            created_at: None,
+            updated_at: None,
+        })
+        .unwrap();
+        let store = crate::live::engine::DeviceStore::at(temp.path().join("device"));
+        let mut request = Binding {
+            root: main.clone(),
+            app: "codex".into(),
+            profile: Some("p".into()),
+            all_worktrees: true,
+            skill_index: false,
+        };
+        let run =
+            |b: &Binding, token: Option<&str>| project_in(&db, b.clone(), token, store.clone());
+        let plan = run(&request, None).unwrap();
+        assert_eq!(plan["changes"].as_array().unwrap().len(), 2);
+        assert!(!main.join("AGENTS.md").exists());
+        run(&request, plan["token"].as_str()).unwrap();
+        assert!(other.join("AGENTS.md").is_file());
+        request.all_worktrees = false;
+        let plan = run(&request, None).unwrap();
+        fs::write(other.join("AGENTS.md"), "manual").unwrap();
+        assert!(run(&request, plan["token"].as_str()).is_err());
+        assert_eq!(
+            fs::read_to_string(other.join("AGENTS.md")).unwrap(),
+            "manual"
+        );
+        fs::write(other.join("AGENTS.md"), "project instructions").unwrap();
+        let plan = run(&request, None).unwrap();
+        run(&request, plan["token"].as_str()).unwrap();
+        assert!(!other.join("AGENTS.md").exists());
+        assert!(main.join("AGENTS.md").is_file());
+    }
     #[test]
     fn cannot_traverse_or_claim_git_metadata() {
         assert!(!safe_rel(Path::new("../x")));

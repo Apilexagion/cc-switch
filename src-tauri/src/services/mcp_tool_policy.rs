@@ -102,6 +102,138 @@ pub fn change(
     }
     Ok(())
 }
+// Claude Code enforces per-tool deny rules in its own settings, not in the
+// server spec. Record ownership in the same guarded write as settings.json so
+// a user-created deny can never be claimed/removed by the UI.
+fn claude_rule_part(part: &str) -> bool {
+    !part.is_empty()
+        && part.len() <= 128
+        && !part.contains("__")
+        && part
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"_-".contains(&b))
+}
+type ClaudeSettings = (crate::live::engine::LiveFile, Option<Vec<u8>>, Vec<Value>);
+fn read_claude() -> Result<ClaudeSettings, AppError> {
+    let f = crate::services::provider::claude_direct::settings_file();
+    let pre = crate::live::engine::read_current(&f.path)?;
+    let (doc, _) = crate::live::patch::json::parse(&f.path, pre.as_deref())?;
+    let deny = match doc.pointer("/permissions/deny") {
+        Some(v) => v
+            .as_array()
+            .cloned()
+            .ok_or_else(|| AppError::Message("Invalid Claude permission list".into()))?,
+        None => vec![],
+    };
+    Ok((f, pre, deny))
+}
+pub fn claude_view(id: &str) -> Result<(Vec<String>, Vec<String>, bool), AppError> {
+    if !claude_rule_part(id) {
+        return Err(AppError::Message(
+            "Unsupported Claude MCP server name".into(),
+        ));
+    }
+    let (_, _, deny) = read_claude()?;
+    let owned = listed("claude", id)?;
+    let prefix = format!("mcp__{id}__");
+    let mut ours = vec![];
+    let mut manual = vec![];
+    let mut all = false;
+    for rule in deny.iter().filter_map(Value::as_str) {
+        if rule == format!("mcp__{id}") || rule == format!("{prefix}*") || rule == "mcp__*" {
+            all = true;
+        }
+        if let Some(n) = rule.strip_prefix(&prefix).filter(|n| claude_rule_part(n)) {
+            if owned.contains(n) {
+                ours.push(n.into());
+            } else {
+                manual.push(n.into());
+            }
+        }
+    }
+    Ok((ours, manual, all))
+}
+pub fn change_claude(
+    db: &crate::database::Database,
+    id: &str,
+    name: &str,
+    blocked: bool,
+) -> Result<(), AppError> {
+    use crate::live::{
+        engine::{digest, read_current, LiveFile},
+        patch::{json::JsonPatch, Guarded, KeyPath, LivePatch, WholeFile},
+    };
+    use crate::mode::{
+        operation::{AppWrite, FileChange},
+        state::{op, PendingTarget},
+    };
+    if !claude_rule_part(id) || !claude_rule_part(name) {
+        return Err(AppError::Message("Unsupported Claude MCP rule name".into()));
+    }
+    if !crate::config::get_claude_config_dir().is_dir() {
+        return Err(AppError::Message("Initialize Claude Code first".into()));
+    }
+    let _guard = WRITES.lock_recover();
+    let write = AppWrite::begin(db, "claude")?;
+    let policy = LiveFile::private(file());
+    let ppre = read_current(&policy.path)?;
+    let mut rules: Rules = match ppre.as_deref() {
+        Some(b) => serde_json::from_slice(b)
+            .map_err(|_| AppError::Message("Invalid MCP tool policy".into()))?,
+        None => Default::default(),
+    };
+    let managed = rules
+        .entry("claude".into())
+        .or_default()
+        .entry(id.into())
+        .or_default();
+    let (f, pre, mut deny) = read_claude()?;
+    let entry = Value::String(format!("mcp__{id}__{name}"));
+    if blocked {
+        if deny.contains(&entry) {
+            return Ok(());
+        }
+        deny.push(entry);
+        managed.insert(name.into());
+    } else {
+        if !managed.remove(name) {
+            return Err(AppError::Message(
+                "This Claude deny rule is not owned by CC Switch".into(),
+            ));
+        }
+        deny.retain(|v| v != &entry);
+    }
+    let json = JsonPatch {
+        set: vec![(KeyPath::new(&["permissions", "deny"]), Value::Array(deny))],
+        ..Default::default()
+    };
+    let cfg = Guarded {
+        expected_pre: digest(pre.as_deref()),
+        then: WholeFile::Write(json.apply(&f.path, pre.as_deref())?),
+    };
+    let own = Guarded {
+        expected_pre: digest(ppre.as_deref()),
+        then: WholeFile::Write(
+            serde_json::to_vec_pretty(&rules).map_err(|e| AppError::Message(e.to_string()))?,
+        ),
+    };
+    write.run(
+        op::APPLY,
+        &[
+            FileChange {
+                file: f,
+                patch: &cfg,
+            },
+            FileChange {
+                file: policy,
+                patch: &own,
+            },
+        ],
+        PendingTarget::default(),
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

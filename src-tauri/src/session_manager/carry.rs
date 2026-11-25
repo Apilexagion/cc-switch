@@ -46,6 +46,50 @@ fn native_context(s: &str) -> bool {
     .iter()
     .any(|prefix| s.starts_with(prefix))
 }
+// Preserve useful tool history as inert assistant text, never as a live tool
+// call or a user instruction. Omit images, credentials envelopes and reasoning.
+fn excerpt(value: &Value) -> String {
+    let mut summary = String::new();
+    let mut push = |s: &str| {
+        if summary.len() < 4096 && !native_context(s) && !s.trim_start().starts_with("data:") {
+            for c in s.chars() {
+                if summary.len() + c.len_utf8() > 4096 {
+                    break;
+                }
+                summary.push(c);
+            }
+            if summary.len() < 4096 {
+                summary.push('\n');
+            }
+        }
+    };
+    if let Some(s) = value.as_str() {
+        push(s);
+    } else if let Some(a) = value.as_array() {
+        for v in a {
+            if v["type"] == "text" {
+                if let Some(s) = v["text"].as_str() {
+                    push(s);
+                }
+            }
+        }
+    } else {
+        for k in [
+            "command",
+            "cmd",
+            "file_path",
+            "path",
+            "stdout",
+            "stderr",
+            "workdir",
+        ] {
+            if let Some(s) = value[k].as_str() {
+                push(s);
+            }
+        }
+    }
+    summary.trim_end().into()
+}
 fn block_text(v: &Value, user: bool, dst: &mut Vec<String>) {
     if let Some(s) = v.as_str() {
         if !s.trim().is_empty() && !native_context(s) {
@@ -63,13 +107,14 @@ fn block_text(v: &Value, user: bool, dst: &mut Vec<String>) {
                 }
             }
             Some("tool_use") if !user => dst.push(format!(
-                "[Historical tool call: {}]",
+                "[Historical tool call: {}] {}",
                 b["name"]
                     .as_str()
                     .unwrap_or("tool")
                     .chars()
                     .take(100)
-                    .collect::<String>()
+                    .collect::<String>(),
+                excerpt(&b["input"])
             )),
             _ => {} // media, thinking, signatures and tool results are not instructions
         }
@@ -86,6 +131,16 @@ fn append(v: &Value, words: &mut Words) {
     if !pieces.is_empty() {
         words.push((user, pieces.join("\n\n")));
     }
+    if user {
+        for block in v["content"].as_array().into_iter().flatten() {
+            if block["type"] == "tool_result" {
+                let text = excerpt(&block["content"]);
+                if !text.is_empty() {
+                    words.push((false, format!("[Historical tool result] {text}")));
+                }
+            }
+        }
+    }
 }
 fn extract(bytes: &[u8], from: &str, id: &str) -> Result<Words, String> {
     let mut nodes = HashMap::new();
@@ -98,6 +153,9 @@ fn extract(bytes: &[u8], from: &str, id: &str) -> Result<Words, String> {
         }
         if line.iter().all(u8::is_ascii_whitespace) {
             continue;
+        }
+        if line.len() > 8 * 1024 * 1024 {
+            return Err("Session contains a record larger than 8 MiB".into());
         }
         let row: Value = serde_json::from_slice(line)
             .map_err(|_| format!("Unreadable session record {}", i + 1))?;
@@ -174,7 +232,20 @@ fn push_codex(p: &Value, words: &mut Words) {
                 .chars()
                 .take(100)
                 .collect::<String>();
-            words.push((false, format!("[Historical tool call: {name}]")));
+            let args = p
+                .get("arguments")
+                .or(p.get("input"))
+                .unwrap_or(&Value::Null);
+            words.push((
+                false,
+                format!("[Historical tool call: {name}] {}", excerpt(args)),
+            ));
+        }
+        Some("function_call_output" | "custom_tool_call_output") => {
+            let text = excerpt(&p["output"]);
+            if !text.is_empty() {
+                words.push((false, format!("[Historical tool result] {text}")));
+            }
         }
         _ => {}
     }
@@ -326,6 +397,11 @@ pub fn copy(from: &str, id: &str, source_path: &str) -> Result<CopyResult, Strin
     } else {
         (crate::config::get_claude_config_dir(), String::new())
     };
+    if !home.is_dir() {
+        return Err(format!(
+            "Initialize {to} before copying a conversation into it"
+        ));
+    }
     write_copy(&home, to, &cwd, &provider, words)
 }
 
@@ -342,7 +418,20 @@ mod tests {
         let base = tempfile::tempdir().unwrap();
         for to in ["claude", "codex"] {
             let r = write_copy(base.path(), to, "/project", "openai", w.clone()).unwrap();
-            let bytes = fs::read(r.source_path).unwrap();
+            let dest = Path::new(&r.source_path);
+            let messages = if to == "claude" {
+                super::super::providers::claude::load_messages(dest)
+            } else {
+                super::super::providers::codex::load_messages(dest)
+            }
+            .unwrap();
+            assert!(messages
+                .iter()
+                .any(|m| m.role == "user" && m.content.contains("hello")));
+            assert!(messages
+                .iter()
+                .any(|m| m.role == "assistant" && m.content.contains("answer")));
+            let bytes = fs::read(dest).unwrap();
             assert_eq!(
                 extract(&bytes, to, &r.session_id).unwrap(),
                 vec![(true, "hello".into()), (false, "answer".into())]

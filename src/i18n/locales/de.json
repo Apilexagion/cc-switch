@@ -6119,7 +6119,7 @@
     "preview": "Preview changes",
     "apply": "Apply reviewed changes",
     "toolPolicy": "Per-client tool controls",
-    "toolNote": "Discovery connects to the saved server and starts it for stdio; no tools are executed. Changes save immediately on this device. Native enforcement: Codex / Gemini CLI only; grayed-out tools are disabled by the original config.",
+    "toolNote": "Discovery connects to the saved server and starts it for stdio; no tools are executed. Changes apply on this device to Claude Code, Codex or Gemini CLI. Existing user denials cannot be removed here. A client restart may be needed.",
     "listTools": "Connect and list tools",
     "routing": "Routing decisions",
     "footprint": "Outbound context by approximate bytes, not billed tokens",
@@ -6139,6 +6139,17 @@
     "route_accountBoundary": "Cannot switch to an official account",
     "route_circuit": "Circuit breaker refused attempt",
     "route_retryable": "Retryable failure; advance in queue",
-    "route_inputLimit": "Upstream rejected input length; try another candidate"
+    "route_inputLimit": "Upstream rejected input length; try another candidate",
+    "previous": "Previously bound profile",
+    "carryNote": "Create a separate local session in the other client. Copy main-thread user and assistant text; tools are historical notes. Images, private reasoning and old instructions are omitted. No terminal is opened and no requests are sent until you continue in that client.",
+    "route_single": "Single eligible candidate",
+    "route_order": "Queue priority",
+    "route_usage": "Least used first",
+    "route_rotate": "Round-robin choice",
+    "route_smart": "Sorted by quota and reset time",
+    "route_pace": "Sorted by remaining quota per hour",
+    "route_quotaUnknown": "No known quota; kept queue order",
+    "route_officialPin": "Pinned official account",
+    "route_sticky": "Pinned to the last successful session provider"
   }
 }

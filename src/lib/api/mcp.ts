@@ -12,6 +12,7 @@ export interface ToolNames {
   names: string[];
   disabled: string[];
   native: string[];
+  all?: boolean;
 }
 export const mcpApi = {
   listTools(id: string, app: string) {

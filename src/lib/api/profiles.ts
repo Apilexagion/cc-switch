@@ -62,6 +62,7 @@ export type CheckoutBinding = {
   skillIndex: boolean;
 };
 export interface CheckoutPreview {
+  previousProfile?: string | null;
   token: string;
   checkouts: string[];
   changes: { checkout: string; file: string; action: string }[];
