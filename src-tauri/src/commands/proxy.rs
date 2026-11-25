@@ -68,6 +68,29 @@ pub async fn get_proxy_takeover_status(
     state.proxy_service.get_takeover_status().await
 }
 
+#[tauri::command]
+pub async fn inspect_live_configuration(
+    state: tauri::State<'_, AppState>,
+    app_type: String,
+) -> Result<crate::mode::controller::inspect::Preview, String> {
+    crate::mode::controller::inspect::preview(state.inner(), &require_mode_app(&app_type)?).await
+}
+#[tauri::command]
+pub async fn apply_inspected_configuration(
+    state: tauri::State<'_, AppState>,
+    app_type: String,
+    token: String,
+    exit: bool,
+) -> Result<(), String> {
+    crate::mode::controller::inspect::apply(
+        state.inner(),
+        &require_mode_app(&app_type)?,
+        &token,
+        exit,
+    )
+    .await
+}
+
 /// 为指定应用进入 / 退出代理模式。`stack` 为真时进入的是 Stack 模式（和路由模式二选一），
 /// `route` 是确认框里选的路由目标（Stack 模式下是默认那家，不传沿用上次的路由）；退出时
 /// 两者都不看。

@@ -30,7 +30,21 @@ function normalizeRoutingStrategy(value: string): ProviderRoutingStrategy {
     : "order";
 }
 
+export interface ConfigPreview {
+  token: string;
+  rows: Array<{ file: string; field: string; current: string; exit: string }>;
+}
 export const proxyApi = {
+  inspect(appType: string) {
+    return invoke<ConfigPreview>("inspect_live_configuration", { appType });
+  },
+  applyInspected(appType: string, token: string, exit: boolean) {
+    return invoke<void>("apply_inspected_configuration", {
+      appType,
+      token,
+      exit,
+    });
+  },
   // ========== 代理服务器控制 API ==========
 
   // 启动代理服务器

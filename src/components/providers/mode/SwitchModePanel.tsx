@@ -43,6 +43,7 @@ import {
 } from "@/components/providers/presentation";
 import { APP_DISPLAY_NAME } from "@/components/shell/AppGlyph";
 import { ModeTabs, MODE_TONE } from "./ModeTabs";
+import { ConfigInspection, canInspect } from "./ConfigInspection";
 import { ModeDialog, type ModeDialogState } from "./ModeDialog";
 import {
   sameStackSubagent,
@@ -152,6 +153,7 @@ export function SwitchModePanel({
   const modeActions = useModeActions(app);
   const desktopMessages = useDesktopConfigMessages(app === "claude-desktop");
 
+  const [inspectOpen, setInspectOpen] = useState(false);
   const [dialog, setDialog] = useState<ModeDialogState | null>(null);
   const [routeSettingsOpen, setRouteSettingsOpen] = useState(false);
   const [stackSettingsOpen, setStackSettingsOpen] = useState(false);
@@ -650,7 +652,27 @@ export function SwitchModePanel({
         />
       </div>
 
+      {active !== "direct" && canInspect(app) && (
+        <div className="px-6 py-1">
+          <button
+            className="text-caption text-fg-2"
+            aria-expanded={inspectOpen}
+            onClick={() => setInspectOpen((v) => !v)}
+          >
+            {t("magpiePorts.inspect")}
+          </button>
+          {inspectOpen && <ConfigInspection key={app} app={app} repair />}
+        </div>
+      )}
       <ModeDialog
+        inspectExit={
+          canInspect(app) &&
+          active !== "direct" &&
+          serviceRunning &&
+          !!modeView?.attached &&
+          dialog?.kind === "exit" &&
+          (!dialog.useProviderId || dialog.useProviderId === directId)
+        }
         app={app}
         state={dialog}
         active={active}
@@ -673,9 +695,10 @@ export function SwitchModePanel({
         }
         onClose={() => setDialog(null)}
         onEnter={enterMode}
-        onExit={(useProviderId) =>
+        onExit={(useProviderId, token) =>
           modeActions.exitToDirect({
             directProviderId: directId,
+            token,
             useProviderId,
             providerName: nameOf(useProviderId ?? directId),
           })

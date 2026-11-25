@@ -6091,6 +6091,17 @@
   },
   "magpiePorts": {
     "carry": "Kopyaya {{target}} ile devam et",
-    "copied": "Created a new session; the original is unchanged"
+    "copied": "Created a new session; the original is unchanged",
+    "inspect": "Configuration health / disconnect preview",
+    "inspectNote": "Primary config fields only; values are never shown. Unlisted fields are kept. Login, catalogs and resources are resolved when switching; the keychain is not read.",
+    "current": "Reapply",
+    "exit": "Disconnect",
+    "keep": "Keep",
+    "remove": "Remove",
+    "add": "Add",
+    "change": "Change",
+    "conditional": "Depends on login",
+    "noDiff": "No managed configuration differences",
+    "reapply": "Reapply routed configuration"
   }
 }

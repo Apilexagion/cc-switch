@@ -1,3 +1,4 @@
+import { ConfigInspection } from "./ConfigInspection";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loader2 } from "lucide-react";
@@ -86,7 +87,8 @@ interface ModeDialogProps {
     subagent?: StackSubagentValue,
   ) => Promise<void>;
   /** 回到直连（`useProviderId` 见 `exit` 状态） */
-  onExit: (useProviderId?: string) => Promise<void>;
+  inspectExit?: boolean;
+  onExit: (useProviderId?: string, token?: string) => Promise<void>;
   /** 对话框 F：仍然直连切换 */
   onSwitchDirect: (providerId: string) => void;
 }
@@ -372,11 +374,13 @@ function ExitBody({
   onClose,
   onCancel,
   onExit,
+  inspectExit,
 }: ModeDialogProps & {
   state: Extract<ModeDialogState, { kind: "exit" }>;
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const [token, setToken] = useState<string | null>(null);
   const appName = APP_DISPLAY_NAME[app];
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -409,7 +413,12 @@ function ExitBody({
     setBusy(true);
     setError(null);
     try {
-      await onExit(state.useProviderId);
+      if (inspectExit) {
+        if (!token) return;
+        await onExit(state.useProviderId, token);
+      } else {
+        await onExit(state.useProviderId);
+      }
       onClose();
     } catch (err) {
       setError(extractErrorMessage(err) || t("common.unknown"));
@@ -441,6 +450,7 @@ function ExitBody({
         ))}
       </ul>
 
+      {inspectExit && <ConfigInspection app={app} onToken={setToken} />}
       {error && (
         <p
           role="alert"
@@ -463,7 +473,7 @@ function ExitBody({
         <Button
           variant="direct"
           size="regular"
-          disabled={busy}
+          disabled={busy || (inspectExit && !token)}
           onClick={() => void confirm()}
         >
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

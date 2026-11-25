@@ -18,6 +18,8 @@
 //! 调用方持有这个应用的代理切换锁（`ProxyService::lock_switch_for_app`）；写引擎的应用
 //! 写锁在更里面拿，两把锁不反向嵌套。
 
+pub mod inspect;
+
 use crate::sync_utils::MutexExt;
 use serde_json::{json, Value};
 use tokio::sync::OwnedMutexGuard;

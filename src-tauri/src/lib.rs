@@ -1927,6 +1927,8 @@ pub fn run() {
             commands::stop_proxy_with_restore,
             commands::get_proxy_takeover_status,
             commands::set_proxy_takeover_for_app,
+            commands::inspect_live_configuration,
+            commands::apply_inspected_configuration,
             commands::get_app_mode,
             commands::set_proxy_route,
             commands::take_startup_attach_failures,

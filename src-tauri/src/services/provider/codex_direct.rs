@@ -1165,6 +1165,48 @@ fn guarded(pre: Option<&[u8]>, then: WholeFile) -> Guarded {
     }
 }
 
+// Shared by the writer and the side-effect-free inspector. No credential store is opened
+// to preview; alternatives dependent on login are reported as conditional.
+fn finish_config(
+    mut config: CodexConfigPatch,
+    openai_route: Option<String>,
+    stamp: Option<RouteAuth>,
+    login: bool,
+) -> CodexConfigPatch {
+    if let Some(base_url) = openai_route.filter(|_| login) {
+        config.route = RouteWrite::OfficialProxy {
+            base_url,
+            unified: false,
+        };
+    }
+    if let (Some(kind), RouteWrite::Custom(table)) = (stamp, &mut config.route) {
+        if matches!(kind, RouteAuth::Bearer | RouteAuth::EnvKey) {
+            table.insert(
+                "requires_openai_auth",
+                toml_edit::value(requires_openai_auth(kind, login)),
+            );
+        }
+    }
+    config
+}
+pub(crate) fn inspect_configs(
+    db: &Database,
+    owner: &Owner<'_>,
+    target: &Target<'_>,
+) -> Result<Vec<CodexConfigPatch>, AppError> {
+    let plan = plan(db, owner, target, &Prepared::default())?;
+    Ok([false, true]
+        .map(|login| {
+            finish_config(
+                plan.config.clone(),
+                plan.openai_route.clone(),
+                plan.stamp,
+                login,
+            )
+        })
+        .into())
+}
+
 /// 执行一次 Codex 写入：拿写锁，决定 `auth.json` 的去向，和 `config.toml`、模型目录、
 /// 托管账号标记、登录暂存一起提交，最后落定 `pending`（指针、模式状态）。
 pub(crate) fn run(
@@ -1278,21 +1320,7 @@ pub(crate) fn run_with_edits(
             !matches!(planned.auth, AuthGoal::ThirdParty) || preserve
         }
     };
-    let mut config = planned.config;
-    if let Some(base_url) = planned.openai_route.filter(|_| login) {
-        config.route = RouteWrite::OfficialProxy {
-            base_url,
-            unified: false,
-        };
-    }
-    if let (Some(kind), RouteWrite::Custom(table)) = (planned.stamp, &mut config.route) {
-        if matches!(kind, RouteAuth::Bearer | RouteAuth::EnvKey) {
-            table.insert(
-                "requires_openai_auth",
-                toml_edit::value(requires_openai_auth(kind, login)),
-            );
-        }
-    }
+    let config = finish_config(planned.config, planned.openai_route, planned.stamp, login);
 
     let auth_patch = auth_plan
         .auth

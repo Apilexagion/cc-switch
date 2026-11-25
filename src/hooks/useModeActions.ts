@@ -83,16 +83,19 @@ export function useModeActions(app: AppId) {
   const exitToDirect = useCallback(
     async ({
       directProviderId,
+      token,
       useProviderId,
       providerName,
     }: {
       directProviderId: string | null;
+      token?: string;
       useProviderId?: string;
       providerName: string;
     }) => {
       setPending(true);
       try {
-        await proxyApi.setProxyTakeoverForApp(app, false);
+        if (token) await proxyApi.applyInspected(app, token, true);
+        else await proxyApi.setProxyTakeoverForApp(app, false);
         if (useProviderId && useProviderId !== directProviderId) {
           await providersApi.switch(useProviderId, app);
         }
