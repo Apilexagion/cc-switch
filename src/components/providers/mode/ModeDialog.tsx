@@ -380,6 +380,8 @@ function ExitBody({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
+  const [unavailable, setUnavailable] = useState(false);
+  const [fallback, setFallback] = useState(false);
   const [token, setToken] = useState<string | null>(null);
   const appName = APP_DISPLAY_NAME[app];
   const [busy, setBusy] = useState(false);
@@ -413,7 +415,7 @@ function ExitBody({
     setBusy(true);
     setError(null);
     try {
-      if (inspectExit) {
+      if (inspectExit && !(unavailable && fallback)) {
         if (!token) return;
         await onExit(state.useProviderId, token);
       } else {
@@ -450,7 +452,23 @@ function ExitBody({
         ))}
       </ul>
 
-      {inspectExit && <ConfigInspection app={app} onToken={setToken} />}
+      {inspectExit && (
+        <ConfigInspection
+          app={app}
+          onToken={setToken}
+          onUnavailable={setUnavailable}
+        />
+      )}
+      {inspectExit && unavailable && (
+        <label className="text-caption">
+          <input
+            type="checkbox"
+            checked={fallback}
+            onChange={(e) => setFallback(e.target.checked)}
+          />{" "}
+          {t("magpiePorts.unpreviewed")}
+        </label>
+      )}
       {error && (
         <p
           role="alert"
@@ -473,7 +491,9 @@ function ExitBody({
         <Button
           variant="direct"
           size="regular"
-          disabled={busy || (inspectExit && !token)}
+          disabled={
+            busy || (inspectExit && !token && !(fallback && unavailable))
+          }
           onClick={() => void confirm()}
         >
           {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" />}

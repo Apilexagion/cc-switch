@@ -6150,6 +6150,11 @@
     "route_pace": "按剩余额度配速排序",
     "route_quotaUnknown": "没有可用额度数据，退回队列顺序",
     "route_officialPin": "保持已选官方账号",
-    "route_sticky": "保持此会话上次成功的供应商"
+    "route_sticky": "保持此会话上次成功的供应商",
+    "unpreviewed": "预览不可用。我仍要使用原退出流程（可能改写主配置）。",
+    "globalIndex": "全局按需索引",
+    "indexNote": "只发布一个索引，不删除原有技能。若同时直装，请先停用重复的直装项；空选后保存可移除索引。",
+    "alsoDirect": "（也已直装）",
+    "indexSaved": "已保存全局技能索引"
   }
 }

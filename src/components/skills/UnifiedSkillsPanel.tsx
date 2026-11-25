@@ -1,3 +1,4 @@
+import { SkillIndexPanel } from "./SkillIndexPanel";
 import { createPortal } from "react-dom";
 import { skillRepositoryLabel } from "@/lib/skillRepository";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -1358,6 +1359,7 @@ const UnifiedSkillsPanel: React.FC<UnifiedSkillsPanelProps> = ({
       {header}
       <div id="main-content" className="flex min-h-0 flex-1 flex-col">
         <div className="shrink-0 px-6 pt-1">{viewTabs}</div>
+        <SkillIndexPanel />
         {/* 两段打开过就一直挂着，切回来不重新加载；不在看的那段只是隐藏 */}
         {discoverMounted && (
           <div

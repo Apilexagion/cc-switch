@@ -30,6 +30,7 @@ use repo_source::RepoSource;
 mod backup;
 mod discovery;
 mod download;
+pub(crate) mod index;
 mod repo;
 mod skills_sh;
 mod sync;

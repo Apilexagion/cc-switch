@@ -56,6 +56,15 @@ async fn http_message(
     if state.fail {
         return Json(json!({"ok": true})).into_response();
     }
+    if message["method"] == "tools/list" {
+        let second = message.pointer("/params/cursor").and_then(Value::as_str) == Some("second");
+        let name = if second { "write_file" } else { "list_files" };
+        let mut result = json!({"tools":[{"name":name,"inputSchema":{"type":"object"}}]});
+        if !second {
+            result["nextCursor"] = json!("second");
+        }
+        return Json(json!({"jsonrpc":"2.0","id":message["id"],"result":result})).into_response();
+    }
     if message["method"] == "initialize" {
         let result = initialize_result(&message);
         if state.stream_response {
@@ -502,4 +511,26 @@ async fn stdio_keeps_inherited_path_when_login_shell_resolution_fails() {
         .unwrap()
         .lines()
         .any(|line| line == "PATH=/inherited/bin:/usr/bin"));
+}
+
+#[tokio::test]
+async fn discovers_two_pages_of_tool_names_without_calling_tools() {
+    let state = MockServer::default();
+    let (url, task) = mock_http(state.clone()).await;
+    let names = super::tool_names(http_spec(&format!("{url}/mcp"), "http"))
+        .await
+        .unwrap();
+    assert_eq!(names, ["list_files", "write_file"]);
+    {
+        let messages = state.messages.lock().unwrap();
+        assert_eq!(
+            messages
+                .iter()
+                .filter(|m| m["method"] == "tools/list")
+                .count(),
+            2
+        );
+        assert!(messages.iter().all(|m| m["method"] != "tools/call"));
+    }
+    task.abort();
 }

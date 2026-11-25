@@ -10,10 +10,12 @@ export const canInspect = (app: string) =>
 export function ConfigInspection({
   app,
   onToken,
+  onUnavailable,
   repair = false,
 }: {
   app: string;
   onToken?: (s: string | null) => void;
+  onUnavailable?: (failed: boolean) => void;
   repair?: boolean;
 }) {
   const { t } = useTranslation();
@@ -25,6 +27,7 @@ export function ConfigInspection({
     let cancel = false;
     setPreview(null);
     onToken?.(null);
+    onUnavailable?.(false);
     setError("");
     proxyApi.inspect(app).then(
       (p) => {
@@ -34,13 +37,16 @@ export function ConfigInspection({
         }
       },
       (e) => {
-        if (!cancel) setError(extractErrorMessage(e) || t("common.error"));
+        if (!cancel) {
+          setError(extractErrorMessage(e) || String(e));
+          onUnavailable?.(true);
+        }
       },
     );
     return () => {
       cancel = true;
     };
-  }, [app, revision, onToken, t]);
+  }, [app, revision, onToken, onUnavailable]);
   const apply = async () => {
     if (!preview || busy) return;
     setBusy(true);

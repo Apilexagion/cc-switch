@@ -388,3 +388,36 @@ pub async fn install_skills_from_zip(
     })
     .await
 }
+
+/// With no IDs the operation is read-only; an empty list removes only our
+/// verified index. Existing direct installations are never modified.
+#[tauri::command]
+pub async fn skill_index(
+    state: tauri::State<'_, AppState>,
+    app: String,
+    ids: Option<std::collections::BTreeSet<String>>,
+) -> Result<serde_json::Value, String> {
+    let app = match app.as_str() {
+        "claude" => AppType::Claude,
+        "codex" => AppType::Codex,
+        _ => return Err("Unsupported skill index client".into()),
+    };
+    let db = state.db.clone();
+    let _switch = if ids.is_some() {
+        Some(
+            crate::mode::controller::lock_settled(&state, &app)
+                .await
+                .map_err(|e| e.to_string())?,
+        )
+    } else {
+        None
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(ids) = ids {
+            SkillService::set_index(&db, &app, ids).map_err(|e| e.to_string())?;
+        }
+        SkillService::index_info(&db, &app).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

@@ -1853,6 +1853,7 @@ pub fn run() {
             commands::delete_env_vars,
             // Skill management (v3.10.0+ unified)
             commands::get_installed_skills,
+            commands::skill_index,
             commands::refresh_local_skill_metadata,
             commands::get_skill_backups,
             commands::delete_skill_backup,

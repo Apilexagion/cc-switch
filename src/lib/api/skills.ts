@@ -207,7 +207,14 @@ export interface SkillRepo {
 
 // ========== API ==========
 
+export interface IndexCatalog {
+  ids: string[];
+  choices: { id: string; name: string; direct: boolean }[];
+}
 export const skillsApi = {
+  index(app: "claude" | "codex", ids?: string[]) {
+    return invoke<IndexCatalog>("skill_index", { app, ids: ids ?? null });
+  },
   // ========== 统一管理 API (v3.10.0+) ==========
 
   /** 获取所有已安装的 Skills */

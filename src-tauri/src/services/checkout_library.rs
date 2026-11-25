@@ -269,6 +269,9 @@ fn assets(db: &Database, b: &Binding, app: &AppType) -> Result<Assets, String> {
                 return Err("Invalid skill source".into());
             }
             if b.skill_index {
+                if !super::skill::index::indexable(&src.join("SKILL.md")).map_err(er)? {
+                    return Err(format!("Skill requires direct invocation: {}", sk.name));
+                }
                 index.push_str(&format!(
                     "\n- {}: {}\n  SKILL.md: {}\n",
                     sk.name,

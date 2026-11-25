@@ -6150,6 +6150,11 @@
     "route_pace": "Sorted by remaining quota per hour",
     "route_quotaUnknown": "No known quota; kept queue order",
     "route_officialPin": "Pinned official account",
-    "route_sticky": "Pinned to the last successful session provider"
+    "route_sticky": "Pinned to the last successful session provider",
+    "unpreviewed": "Preview is unavailable. Use the original disconnect flow anyway (may rewrite the primary configuration).",
+    "globalIndex": "Global on-demand skill index",
+    "indexNote": "Publish one index without deleting existing skills. Disable duplicate direct installations separately. Save with no selections to remove the index.",
+    "alsoDirect": "(also installed directly)",
+    "indexSaved": "Global skill index saved"
   }
 }

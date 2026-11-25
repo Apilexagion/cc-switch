@@ -106,13 +106,9 @@ pub(crate) struct SkillsBackup {
 }
 
 pub(crate) fn zip_skills_ssot(dest_path: &Path) -> Result<(), AppError> {
-    let source = SkillService::get_ssot_dir().map_err(|e| {
-        localized(
-            "webdav.sync.skills_ssot_dir_failed",
-            format!("获取 Skills SSOT 目录失败: {e}"),
-            format!("Failed to resolve Skills SSOT directory: {e}"),
-        )
-    })?;
+    // Export/preview may run on a new device. A missing source means an
+    // empty archive, not permission to create a live Skills directory.
+    let source = SkillService::ssot_path();
     if let Some(parent) = dest_path.parent() {
         fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
     }
@@ -124,7 +120,7 @@ pub(crate) fn zip_skills_ssot(dest_path: &Path) -> Result<(), AppError> {
         .last_modified_time(DateTime::default());
 
     let mut budget = ArchiveBudget::default();
-    if source.exists() {
+    if source.try_exists().map_err(|e| AppError::io(&source, e))? {
         let canonical_root = fs::canonicalize(&source).unwrap_or_else(|_| source.clone());
         let mut visited = HashSet::new();
         mark_visited_dir(&canonical_root, &mut visited)?;
