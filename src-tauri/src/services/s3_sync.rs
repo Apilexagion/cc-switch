@@ -11,7 +11,7 @@ use crate::services::s3::{self, S3Credentials};
 use crate::settings::{update_s3_sync_status, S3SyncSettings, WebDavSyncStatus};
 
 use super::sync_protocol::{
-    apply_snapshot, build_local_snapshot, localized, manifest_artifact_path, manifest_precondition,
+    build_local_snapshot, localized, manifest_artifact_path, manifest_precondition,
     persist_sync_success_best_effort, sha256_hex, snapshot_artifact_path,
     validate_artifact_size_limit, validate_manifest_compat, verify_artifact, ArtifactMeta,
     ManifestPrecondition, RemoteLayout, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES,
@@ -107,9 +107,10 @@ async fn put_immutable_artifact(
 }
 
 /// Download remote snapshot and apply to local database + skills.
-pub async fn download(
+pub(crate) async fn download(
     db: &crate::database::Database,
     settings: &mut S3SyncSettings,
+    intent: crate::services::sync_review::Pull<'_>,
 ) -> Result<Value, AppError> {
     settings.validate()?;
     let creds = creds_for(settings);
@@ -142,8 +143,11 @@ pub async fn download(
     let skills_zip =
         download_and_verify(settings, &creds, REMOTE_SKILLS_ZIP, &manifest, version).await?;
 
-    // Apply snapshot
-    apply_snapshot(db, &db_sql, &skills_zip)?;
+    if let Some(preview) =
+        crate::services::sync_review::pull(db, &db_sql, &skills_zip, &manifest_bytes, "s3", intent)?
+    {
+        return Ok(preview);
+    }
 
     let manifest_hash = sha256_hex(&manifest_bytes);
     let _persisted =

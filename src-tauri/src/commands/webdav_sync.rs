@@ -55,8 +55,12 @@ impl SyncBackend for WebDavBackend {
     async fn upload(db: &Database, settings: &mut WebDavSyncSettings) -> Result<Value, AppError> {
         webdav_sync_service::upload(db, settings).await
     }
-    async fn download(db: &Database, settings: &mut WebDavSyncSettings) -> Result<Value, AppError> {
-        webdav_sync_service::download(db, settings).await
+    async fn download<'a>(
+        db: &'a Database,
+        settings: &'a mut WebDavSyncSettings,
+        intent: crate::services::sync_review::Pull<'a>,
+    ) -> Result<Value, AppError> {
+        webdav_sync_service::download(db, settings, intent).await
     }
     async fn fetch_remote_info(settings: &WebDavSyncSettings) -> Result<Option<Value>, AppError> {
         webdav_sync_service::fetch_remote_info(settings).await
@@ -77,8 +81,11 @@ pub async fn webdav_sync_upload(state: State<'_, AppState>) -> Result<Value, Str
 }
 
 #[tauri::command]
-pub async fn webdav_sync_download(state: State<'_, AppState>) -> Result<Value, String> {
-    sync_support::sync_download::<WebDavBackend>(&state).await
+pub async fn webdav_sync_download(
+    state: State<'_, AppState>,
+    token: Option<String>,
+) -> Result<Value, String> {
+    sync_support::sync_download::<WebDavBackend>(&state, token).await
 }
 
 #[tauri::command]

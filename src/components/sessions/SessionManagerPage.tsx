@@ -517,7 +517,7 @@ export function SessionManagerPage({
       toast.success(t("magpiePorts.copied"), {
         description: copy.command,
         action: {
-          label: t("sessionManager.copyResume", { defaultValue: "Copy" }),
+          label: t("common.copy"),
           onClick: () =>
             handleCopy(copy.command, t("sessionManager.resumeCommandCopied")),
         },

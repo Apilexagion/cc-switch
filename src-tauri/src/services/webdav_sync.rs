@@ -14,12 +14,12 @@ use crate::services::webdav::{
 use crate::settings::{update_webdav_sync_status, WebDavSyncSettings, WebDavSyncStatus};
 
 use super::sync_protocol::{
-    apply_snapshot, build_local_snapshot, effective_db_compat_version, localized,
-    manifest_artifact_path, manifest_precondition, persist_sync_success_best_effort, sha256_hex,
-    snapshot_artifact_path, validate_artifact_size_limit, validate_manifest_compat,
-    verify_artifact, ArtifactMeta, ManifestPrecondition, RemoteLayout, SyncManifest,
-    DB_COMPAT_VERSION, MAX_MANIFEST_BYTES, MAX_SYNC_ARTIFACT_BYTES, PREVIOUS_PROTOCOL_VERSION,
-    PROTOCOL_VERSION, REMOTE_DB_SQL, REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
+    build_local_snapshot, effective_db_compat_version, localized, manifest_artifact_path,
+    manifest_precondition, persist_sync_success_best_effort, sha256_hex, snapshot_artifact_path,
+    validate_artifact_size_limit, validate_manifest_compat, verify_artifact, ArtifactMeta,
+    ManifestPrecondition, RemoteLayout, SyncManifest, DB_COMPAT_VERSION, MAX_MANIFEST_BYTES,
+    MAX_SYNC_ARTIFACT_BYTES, PREVIOUS_PROTOCOL_VERSION, PROTOCOL_VERSION, REMOTE_DB_SQL,
+    REMOTE_MANIFEST, REMOTE_SKILLS_ZIP,
 };
 
 #[cfg(test)]
@@ -142,9 +142,10 @@ async fn put_immutable_artifact(
 }
 
 /// Download remote snapshot and apply to local database + skills.
-pub async fn download(
+pub(crate) async fn download(
     db: &crate::database::Database,
     settings: &mut WebDavSyncSettings,
+    intent: crate::services::sync_review::Pull<'_>,
 ) -> Result<Value, AppError> {
     settings.validate()?;
     let auth = auth_for(settings);
@@ -178,8 +179,16 @@ pub async fn download(
     )
     .await?;
 
-    // Apply snapshot
-    apply_snapshot(db, &db_sql, &skills_zip)?;
+    if let Some(preview) = crate::services::sync_review::pull(
+        db,
+        &db_sql,
+        &skills_zip,
+        &snapshot.manifest_bytes,
+        "webdav",
+        intent,
+    )? {
+        return Ok(preview);
+    }
 
     let manifest_hash = sha256_hex(&snapshot.manifest_bytes);
     let _persisted = persist_sync_success_best_effort(

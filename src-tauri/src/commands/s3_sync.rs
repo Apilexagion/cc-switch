@@ -52,8 +52,12 @@ impl SyncBackend for S3Backend {
     async fn upload(db: &Database, settings: &mut S3SyncSettings) -> Result<Value, AppError> {
         s3_sync_service::upload(db, settings).await
     }
-    async fn download(db: &Database, settings: &mut S3SyncSettings) -> Result<Value, AppError> {
-        s3_sync_service::download(db, settings).await
+    async fn download<'a>(
+        db: &'a Database,
+        settings: &'a mut S3SyncSettings,
+        intent: crate::services::sync_review::Pull<'a>,
+    ) -> Result<Value, AppError> {
+        s3_sync_service::download(db, settings, intent).await
     }
     async fn fetch_remote_info(settings: &S3SyncSettings) -> Result<Option<Value>, AppError> {
         s3_sync_service::fetch_remote_info(settings).await
@@ -74,8 +78,11 @@ pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, String>
 }
 
 #[tauri::command]
-pub async fn s3_sync_download(state: State<'_, AppState>) -> Result<Value, String> {
-    sync_support::sync_download::<S3Backend>(&state).await
+pub async fn s3_sync_download(
+    state: State<'_, AppState>,
+    token: Option<String>,
+) -> Result<Value, String> {
+    sync_support::sync_download::<S3Backend>(&state, token).await
 }
 
 #[tauri::command]

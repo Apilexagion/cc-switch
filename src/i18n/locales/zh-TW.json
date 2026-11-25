@@ -6102,6 +6102,11 @@
     "change": "更改",
     "conditional": "依登录状态而定",
     "noDiff": "主配置没有字段差异",
-    "reapply": "重新应用当前路由配置"
+    "reapply": "重新应用当前路由配置",
+    "undo": "撤销本次启动中的最后一次下载",
+    "undoDone": "已还原本机同步前的数据",
+    "syncDiff": "资源差异：{{count}} 项",
+    "syncScope": "列出供应商、提示词、MCP、Skills 与技能文件（最多 500 行）。其他可同步设置也随完整快照恢复。",
+    "planRequired": "请重新打开下载预览"
   }
 }

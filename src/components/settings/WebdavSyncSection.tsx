@@ -1,3 +1,4 @@
+import type { SyncPreview } from "@/lib/api/settings";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
@@ -262,6 +263,34 @@ export function WebdavSyncSection({
 }: WebdavSyncSectionProps) {
   const { t } = useTranslation();
   const queryClient = useQueryClient();
+  const [plan, setPlan] = useState<SyncPreview | null>(null);
+  const [undoBusy, setUndoBusy] = useState(false);
+  const undoLast = async () => {
+    if (undoBusy) return;
+    setUndoBusy(true);
+    try {
+      await settingsApi.undoSyncDownload();
+      await queryClient.invalidateQueries();
+      toast.success(t("magpiePorts.undoDone"));
+    } catch (e) {
+      toast.error(String(e));
+    } finally {
+      setUndoBusy(false);
+    }
+  };
+  const planView = plan && (
+    <div className="space-y-1 border-t pt-2">
+      <strong>{t("magpiePorts.syncDiff", { count: plan.total })}</strong>
+      <p>{t("magpiePorts.syncScope")}</p>
+      <ul className="max-h-40 overflow-auto">
+        {plan.changes.map((r, i) => (
+          <li key={i}>
+            {t("magpiePorts." + r.action)} · {r.group} · {r.name}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
   const [actionState, setActionState] = useState<ActionState>("idle");
   const [dirty, setDirty] = useState(false);
   const [passwordTouched, setPasswordTouched] = useState(false);
@@ -689,6 +718,7 @@ export function WebdavSyncSection({
         return;
       }
       setRemoteInfo(info);
+      setPlan(await settingsApi.previewSyncDownload("webdav"));
       setDialogType("download");
     } catch (error) {
       toast.error(
@@ -710,7 +740,8 @@ export function WebdavSyncSection({
     closeDialog();
     setActionState("downloading");
     try {
-      await settingsApi.webdavSyncDownload();
+      if (!plan) throw new Error(t("magpiePorts.planRequired"));
+      await settingsApi.webdavSyncDownload(plan.token);
       toast.success(t("settings.webdavSync.downloadSuccess"));
       await queryClient.invalidateQueries();
     } catch (error) {
@@ -722,7 +753,7 @@ export function WebdavSyncSection({
     } finally {
       setActionState("idle");
     }
-  }, [closeDialog, dirty, queryClient, t]);
+  }, [plan, closeDialog, dirty, queryClient, t]);
 
   // ─── S3 helpers ────────────────────────────────────────────
 
@@ -937,6 +968,7 @@ export function WebdavSyncSection({
         return;
       }
       setS3RemoteInfo(info);
+      setPlan(await settingsApi.previewSyncDownload("s3"));
       setS3DialogType("download");
     } catch (error) {
       toast.error(
@@ -957,7 +989,8 @@ export function WebdavSyncSection({
     closeS3Dialog();
     setS3ActionState("downloading");
     try {
-      await settingsApi.s3SyncDownload();
+      if (!plan) throw new Error(t("magpiePorts.planRequired"));
+      await settingsApi.s3SyncDownload(plan.token);
       toast.success(t("settings.s3Sync.downloadSuccess"));
       await queryClient.invalidateQueries();
     } catch (error) {
@@ -969,7 +1002,7 @@ export function WebdavSyncSection({
     } finally {
       setS3ActionState("idle");
     }
-  }, [closeS3Dialog, s3Dirty, queryClient, t]);
+  }, [plan, closeS3Dialog, s3Dirty, queryClient, t]);
 
   // ─── Sync type switching with mutual exclusion ─────────────
 
@@ -1076,6 +1109,18 @@ export function WebdavSyncSection({
           {t("settings.webdavSync.title")}
         </h3>
       </header>
+
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={
+          undoBusy || actionState !== "idle" || s3ActionState !== "idle"
+        }
+        onClick={() => void undoLast()}
+      >
+        {t("magpiePorts.undo")}
+      </Button>
 
       {/* ─── Sync type selector ───────────────────────────── */}
       <div className="flex items-center gap-4">
@@ -1764,6 +1809,7 @@ export function WebdavSyncSection({
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 text-sm leading-relaxed">
+                {planView}
                 {remoteInfo && (
                   <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-fg-2">
                     <dt className="font-medium text-fg-1">
@@ -1904,6 +1950,7 @@ export function WebdavSyncSection({
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 text-sm leading-relaxed">
+                {planView}
                 {s3RemoteInfo && (
                   <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-fg-2">
                     <dt className="font-medium text-fg-1">

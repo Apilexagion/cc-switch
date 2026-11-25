@@ -130,3 +130,5 @@ pub(crate) use misc::tool_process::{
     run_detected_tool_command_with_timeout, terminate_child_tree,
 };
 pub(crate) use misc::tool_version::local_tool_version;
+
+pub use sync_support::{preview_sync_download, undo_sync_download};

@@ -41,6 +41,7 @@ pub(crate) trait SyncBackend {
     fn download<'a>(
         db: &'a Database,
         settings: &'a mut Self::Settings,
+        intent: crate::services::sync_review::Pull<'a>,
     ) -> impl Future<Output = Result<Value, AppError>> + Send + 'a;
     fn fetch_remote_info(
         settings: &Self::Settings,
@@ -144,7 +145,50 @@ pub(crate) async fn sync_upload<B: SyncBackend>(state: &AppState) -> Result<Valu
     .map_err(|e| e.to_string())
 }
 
-pub(crate) async fn sync_download<B: SyncBackend>(state: &AppState) -> Result<Value, String> {
+async fn preview<B: SyncBackend>(state: &AppState) -> Result<Value, String> {
+    run_with_sync_lock(async {
+        let mut settings = require_enabled_settings::<B>().map_err(AppError::Message)?;
+        B::download(
+            &state.db,
+            &mut settings,
+            crate::services::sync_review::Pull::Preview,
+        )
+        .await
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub async fn preview_sync_download(
+    state: tauri::State<'_, AppState>,
+    backend: String,
+) -> Result<Value, String> {
+    match backend.as_str() {
+        "webdav" => preview::<super::webdav_sync::WebDavBackend>(&state).await,
+        "s3" => preview::<super::s3_sync::S3Backend>(&state).await,
+        _ => Err("Unknown sync backend".into()),
+    }
+}
+#[tauri::command]
+pub async fn undo_sync_download(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let state = state.inner().clone();
+    run_with_sync_lock(async move {
+        let _dav = crate::services::webdav_auto_sync::AutoSyncSuppressionGuard::new();
+        let _s3 = crate::services::s3_auto_sync::AutoSyncSuppressionGuard::new();
+        tauri::async_runtime::spawn_blocking(move || {
+            crate::services::sync_review::undo(&state.db)?;
+            run_post_import_sync(&state)
+        })
+        .await
+        .map_err(|e| AppError::Message(e.to_string()))?
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+pub(crate) async fn sync_download<B: SyncBackend>(
+    state: &AppState,
+    token: Option<String>,
+) -> Result<Value, String> {
     let db = state.db.clone();
     let app_state_for_sync = state.clone();
 
@@ -154,7 +198,12 @@ pub(crate) async fn sync_download<B: SyncBackend>(state: &AppState) -> Result<Va
     let sync_result = run_download_with_lock::<B, _, _, _, _, _, _>(
         || async {
             let mut settings = require_enabled_settings::<B>().map_err(AppError::Message)?;
-            let result = B::download(&db, &mut settings).await;
+            let result = B::download(
+                &db,
+                &mut settings,
+                crate::services::sync_review::Pull::Apply(token.as_deref()),
+            )
+            .await;
             map_sync_result(result, |error| {
                 persist_sync_error::<B>(&mut settings, error, "manual")
             })

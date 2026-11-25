@@ -6102,6 +6102,11 @@
     "change": "Change",
     "conditional": "Depends on login",
     "noDiff": "No managed configuration differences",
-    "reapply": "Reapply routed configuration"
+    "reapply": "Reapply routed configuration",
+    "undo": "Undo last download in this app session",
+    "undoDone": "Local data restored",
+    "syncDiff": "Resource changes: {{count}}",
+    "syncScope": "Providers, prompts, MCP, skills and skill files (first 500). Other synced settings are also restored with the full snapshot.",
+    "planRequired": "Open the download preview again"
   }
 }

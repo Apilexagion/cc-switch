@@ -31,7 +31,18 @@ export interface WebDavSyncResult {
   status: string;
 }
 
+export interface SyncPreview {
+  token: string;
+  total: number;
+  changes: { group: string; name: string; action: string }[];
+}
 export const settingsApi = {
+  previewSyncDownload(backend: "webdav" | "s3") {
+    return invoke<SyncPreview>("preview_sync_download", { backend });
+  },
+  undoSyncDownload() {
+    return invoke<void>("undo_sync_download");
+  },
   async get(): Promise<Settings> {
     return await invoke("get_settings");
   },
@@ -184,8 +195,8 @@ export const settingsApi = {
     return await invoke("webdav_sync_upload");
   },
 
-  async webdavSyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("webdav_sync_download");
+  async webdavSyncDownload(token?: string): Promise<WebDavSyncResult> {
+    return await invoke("webdav_sync_download", { token: token ?? null });
   },
 
   async webdavSyncSaveSettings(
@@ -224,8 +235,8 @@ export const settingsApi = {
     return await invoke("s3_sync_upload");
   },
 
-  async s3SyncDownload(): Promise<WebDavSyncResult> {
-    return await invoke("s3_sync_download");
+  async s3SyncDownload(token?: string): Promise<WebDavSyncResult> {
+    return await invoke("s3_sync_download", { token: token ?? null });
   },
 
   async s3SyncSaveSettings(

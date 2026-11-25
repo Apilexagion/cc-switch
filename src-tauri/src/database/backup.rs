@@ -281,6 +281,37 @@ impl Database {
         F: FnOnce() -> Result<(), AppError>,
     {
         validate_sql_import_size(sql_raw.len() as u64, MAX_SQL_IMPORT_BYTES)?;
+        let (_staging_file, temp_conn) = Self::stage_sync_sql(sql_raw, execution_timeout)?;
+        on_staging_ready()?;
+
+        let backup_file_guard = lock_backup_file_operations();
+        // Keep one main-DB guard across the safety snapshot, local-table read,
+        // and final replacement so neither the rollback point nor preserved
+        // device-local rows can miss writes that arrived during staging.
+        let backup_path = {
+            let mut main_conn = lock_conn!(self.conn);
+            let backup_path =
+                Self::backup_database_file_from_conn(&backup_file_guard, &main_conn, &[])?;
+            if !preserve_tables.is_empty() {
+                Self::restore_tables(&main_conn, &temp_conn, preserve_tables)?;
+            }
+            self.replace_from_staging(&temp_conn, &mut main_conn, "替换主数据库")?;
+            backup_path
+        };
+
+        let backup_id = backup_path
+            .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
+            .unwrap_or_default();
+
+        Ok(backup_id)
+    }
+
+    // A preview and a restore use the very same SQL admission, guard, migration and
+    // validation path. Nothing is attached to or written into the live DB here.
+    pub(crate) fn stage_sync_sql(
+        sql_raw: &str,
+        execution_timeout: Duration,
+    ) -> Result<(NamedTempFile, Connection), AppError> {
         let sql_content = sql_raw.trim_start_matches('\u{feff}');
         Self::validate_cc_switch_sql_export(sql_content)?;
 
@@ -353,28 +384,7 @@ impl Database {
         Self::apply_schema_migrations_on_conn(&temp_conn)?;
         // 导入和同步不经过保存时的校验：坏的自定义图标在这里清掉，不带进主库
         crate::services::provider::icon::strip_invalid_custom_icons(&temp_conn)?;
-        on_staging_ready()?;
-
-        let backup_file_guard = lock_backup_file_operations();
-        // Keep one main-DB guard across the safety snapshot, local-table read,
-        // and final replacement so neither the rollback point nor preserved
-        // device-local rows can miss writes that arrived during staging.
-        let backup_path = {
-            let mut main_conn = lock_conn!(self.conn);
-            let backup_path =
-                Self::backup_database_file_from_conn(&backup_file_guard, &main_conn, &[])?;
-            if !preserve_tables.is_empty() {
-                Self::restore_tables(&main_conn, &temp_conn, preserve_tables)?;
-            }
-            self.replace_from_staging(&temp_conn, &mut main_conn, "替换主数据库")?;
-            backup_path
-        };
-
-        let backup_id = backup_path
-            .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
-            .unwrap_or_default();
-
-        Ok(backup_id)
+        Ok((temp_file, temp_conn))
     }
 
     /// 创建内存快照以避免长时间持有数据库锁
