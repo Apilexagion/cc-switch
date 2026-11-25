@@ -215,6 +215,27 @@ pub(super) struct CopilotAutoRoute {
     pub(super) compaction: bool,
 }
 
+pub(super) enum AutoRetry {
+    Available,
+    Requested(String),
+    Retrying(String),
+}
+
+impl AutoRetry {
+    pub(super) fn request(&mut self, account: &str) {
+        if matches!(self, Self::Available) {
+            *self = Self::Requested(account.to_owned());
+        }
+    }
+
+    pub(super) fn pinned_account(&self) -> Option<&str> {
+        match self {
+            Self::Retrying(account) => Some(account),
+            _ => None,
+        }
+    }
+}
+
 impl RequestForwarder {
     pub(super) fn copilot_auth(&self) -> Option<Arc<RwLock<CopilotAuthManager>>> {
         #[cfg(test)]
@@ -231,7 +252,7 @@ impl RequestForwarder {
         attempt: &Attempt<'_>,
         body: &Value,
         deadline: tokio::time::Instant,
-        retry_auto: &mut bool,
+        retry_auto: &mut AutoRetry,
     ) -> Result<CopilotAutoRoute, ProxyError> {
         let Attempt {
             app_type,
@@ -243,11 +264,12 @@ impl RequestForwarder {
             ProxyError::AuthError("Copilot Auto requires managed account authentication".into())
         })?;
         let auth = auth.read().await;
-        let account_id = match provider
-            .meta
-            .as_ref()
-            .and_then(|m| m.managed_account_id_for("github_copilot"))
-        {
+        let account_id = match retry_auto.pinned_account().map(str::to_owned).or_else(|| {
+            provider
+                .meta
+                .as_ref()
+                .and_then(|m| m.managed_account_id_for("github_copilot"))
+        }) {
             Some(id) => id,
             None => auth.resolve_default_account_id().await.ok_or_else(|| {
                 ProxyError::AuthError("No GitHub Copilot account is available".into())
@@ -265,7 +287,7 @@ impl RequestForwarder {
                 .await
                 .map_err(|err| {
                     if matches!(err, CopilotAuthError::ModelsUnauthorized) {
-                        *retry_auto = true;
+                        retry_auto.request(&account_id);
                         ProxyError::UpstreamError {
                             status: 401,
                             body: Some(err.to_string()),
@@ -317,7 +339,7 @@ impl RequestForwarder {
         if matches!(snapshot, Err(ProxyError::UpstreamError { status: 401, .. })) {
             auth.invalidate_token_if_matches(&key.account_id, &access_token)
                 .await;
-            *retry_auto = true;
+            retry_auto.request(&key.account_id);
         }
         let snapshot = snapshot?;
         let model = catalogue.iter().find(|m| m.id == snapshot.selected_model);

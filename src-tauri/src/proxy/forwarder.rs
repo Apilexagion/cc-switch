@@ -1063,6 +1063,7 @@ impl RequestForwarder {
         &self,
         provider: &Provider,
         adapter: &dyn ProviderAdapter,
+        pinned_copilot_account: Option<&str>,
     ) -> Result<Option<PreparedManagedAccount>, ProxyError> {
         if !self.subscription_account_failover {
             return Ok(None);
@@ -1123,9 +1124,13 @@ impl RequestForwarder {
             .as_ref()
             .and_then(|meta| meta.managed_account_id_for(auth_provider))
             .or(default_account);
-        let Some(account_id) =
-            self.router
-                .choose_managed_account(auth_provider, preferred, &candidates)
+        let Some(account_id) = pinned_copilot_account
+            .filter(|_| auth_provider == "github_copilot")
+            .map(str::to_owned)
+            .or_else(|| {
+                self.router
+                    .choose_managed_account(auth_provider, preferred, &candidates)
+            })
         else {
             return Ok(None);
         };
@@ -1973,7 +1978,7 @@ impl RequestForwarder {
                     is_managed_copilot_request(attempt.app_type, attempt.provider, &url)
                 }))
         .then(|| body.clone());
-        let mut retry_auto = false;
+        let mut retry_auto = AutoRetry::Available;
         let result = self
             .forward_once(
                 attempt,
@@ -1983,7 +1988,7 @@ impl RequestForwarder {
                 &mut retry_auto,
             )
             .await;
-        if retry_auto {
+        if let AutoRetry::Requested(account) = retry_auto {
             let body = if let Some(original) = original_body {
                 let mut replay = original.replay()?;
                 self.prepare_provider_body(&mut replay, attempt.provider);
@@ -1999,7 +2004,7 @@ impl RequestForwarder {
                 body,
                 codex_upstream_format_out,
                 started,
-                &mut false,
+                &mut AutoRetry::Retrying(account),
             )
             .await
         } else {
@@ -2013,7 +2018,7 @@ impl RequestForwarder {
         body: Value,
         codex_upstream_format_out: &mut Option<CodexUpstreamFormat>,
         attempt_started: tokio::time::Instant,
-        retry_auto: &mut bool,
+        retry_auto: &mut AutoRetry,
     ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
         let mut diagnostic_attempt = self.diagnostics.as_ref().map(|diagnostics| {
             diagnostics.attempt(
@@ -2059,7 +2064,7 @@ impl RequestForwarder {
         body: Value,
         codex_upstream_format_out: &mut Option<CodexUpstreamFormat>,
         attempt_started: tokio::time::Instant,
-        retry_auto: &mut bool,
+        retry_auto: &mut AutoRetry,
         mut diagnostic_attempt: Option<&mut super::diagnostics::AttemptGuard>,
     ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
         let Attempt {
@@ -2081,7 +2086,9 @@ impl RequestForwarder {
                 "Codex 原生官方登录路由不支持 LAN 网关，请选择可代理的供应商".to_string(),
             ));
         }
-        let prepared_account = self.prepare_managed_account(provider, adapter).await?;
+        let prepared_account = self
+            .prepare_managed_account(provider, adapter, retry_auto.pinned_account())
+            .await?;
         let provider = prepared_account
             .as_ref()
             .map(|account| &account.provider)
@@ -3414,7 +3421,7 @@ impl RequestForwarder {
                 self.copilot_auto_sessions
                     .invalidate_if_token_matches(&route.key, &route.session_token)
                     .await;
-                *retry_auto = true;
+                retry_auto.request(&route.key.account_id);
             } else if status.is_success() {
                 self.copilot_auto_sessions.touch(&route.key).await;
             }
@@ -3487,7 +3494,10 @@ impl RequestForwarder {
             // 订阅内多账号故障转移：鉴权失效/限流（401/403/429）时，把本次使用的托管账号
             // 送入冷却，同订阅池内后续请求自动改选其它健康账号。本调用是进程内 map 写入，
             // 绝不阻断当前响应（当前请求仍按原样把上游错误回传给客户端）。
-            if self.subscription_account_failover && matches!(status_code, 401 | 403 | 429) {
+            if self.subscription_account_failover
+                && matches!(status_code, 401 | 403 | 429)
+                && !matches!(retry_auto, AutoRetry::Requested(_))
+            {
                 if let Some((auth_provider, account_id)) = &used_managed_account {
                     self.router
                         .record_account_cooldown(auth_provider, account_id);

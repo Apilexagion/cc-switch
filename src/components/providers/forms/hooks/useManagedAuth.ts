@@ -372,7 +372,6 @@ export function useManagedAuth(
     onSuccess: async () => {
       // Antigravity 的「默认」就是 agy 的全局登录：切完提醒已经开着的 agy 还用原来的号
       if (authProvider === "agy_oauth") {
-        await resetAgyCurrentQuota(queryClient);
         const running = await authApi.agyAccountIsRunning().catch(() => false);
         if (running) {
           toast.warning(

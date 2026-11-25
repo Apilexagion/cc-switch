@@ -741,6 +741,28 @@ describe("Codex model-fetch lifecycle", () => {
   });
 });
 
+// Copilot returns catalog capabilities alongside its models. The other two
+// model fetchers still return a plain list.
+function queueReviewerFetch(kind: ProviderKind) {
+  type Models = Array<CopilotModel & FetchedModel>;
+  let resolve!: (items: Models) => void;
+  let reject!: (error: Error) => void;
+  const result = new Promise<Models>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  if (kind === "copilot") {
+    vi.mocked(copilotGetModelsForAccount).mockReturnValueOnce(
+      result.then((models) => modelOptions(models)),
+    );
+  } else if (kind === "xai") {
+    vi.mocked(fetchXaiOauthModels).mockReturnValueOnce(result);
+  } else {
+    vi.mocked(fetchModelsForConfig).mockReturnValueOnce(result);
+  }
+  return { resolve, reject };
+}
+
 const reviewerFetchButton = () =>
   screen.getByRole("button", { name: "拉取模型", hidden: true });
 
@@ -757,7 +779,7 @@ describe("Codex approval reviewer model fetching", () => {
   it.each(providerKinds)(
     "fetches %s reviewer choices without opening the catalog picker or changing catalog/main model",
     async (kind) => {
-      fetchMockFor(kind).mockResolvedValue([advertisedModel("reviewer-1")]);
+      queueReviewerFetch(kind).resolve([advertisedModel("reviewer-1")]);
       const props = {
         ...makeProps(kind),
         onAutoReviewModelChange: vi.fn(),
@@ -817,11 +839,8 @@ describe("Codex approval reviewer model fetching", () => {
   it.each(providerKinds)(
     "keeps a newer %s reviewer request loading when an old identity response finishes",
     async (kind) => {
-      const oldRequest = pendingModels();
-      const newRequest = pendingModels();
-      fetchMockFor(kind)
-        .mockReturnValueOnce(oldRequest.promise)
-        .mockReturnValueOnce(newRequest.promise);
+      const oldRequest = queueReviewerFetch(kind);
+      const newRequest = queueReviewerFetch(kind);
       const props = { ...makeProps(kind), onAutoReviewModelChange: vi.fn() };
       const { rerender } = render(<Harness {...props} />);
       fireEvent.click(reviewerFetchButton());
@@ -860,8 +879,7 @@ describe("Codex approval reviewer model fetching", () => {
   it.each(providerKinds)(
     "ignores stale %s reviewer failures after credentials change",
     async (kind) => {
-      const pending = pendingModels();
-      fetchMockFor(kind).mockReturnValueOnce(pending.promise);
+      const pending = queueReviewerFetch(kind);
       const props = { ...makeProps(kind), onAutoReviewModelChange: vi.fn() };
       const { rerender } = render(<Harness {...props} />);
       fireEvent.click(reviewerFetchButton());
@@ -905,8 +923,7 @@ describe("Codex approval reviewer model fetching", () => {
   it.each(["official", "stack"] as const)(
     "discards pending reviewer results after switching to %s and back",
     async (mode) => {
-      const pending = pendingModels();
-      vi.mocked(fetchModelsForConfig).mockReturnValueOnce(pending.promise);
+      const pending = queueReviewerFetch("config");
       const props = {
         ...makeProps("config"),
         onAutoReviewModelChange: vi.fn(),

@@ -52,6 +52,7 @@ vi.mock("sonner", () => ({
   toast: {
     success: toastMocks.success,
     warning: toastMocks.warning,
+    error: vi.fn(),
   },
 }));
 

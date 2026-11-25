@@ -62,6 +62,7 @@ async fn ordinary_forwarding_does_not_follow_credentialed_redirects() {
             b"payload".to_vec(),
             false,
             false,
+            None,
         )
         .await
         .unwrap();
@@ -214,6 +215,7 @@ async fn gateway_official_codex_is_rejected_before_native_session_access() {
                 adapter: adapter.as_ref(),
             },
             json!({"model":"gpt-5"}),
+            None,
             &mut None,
         )
         .await;
@@ -580,6 +582,8 @@ async fn copilot_auto_forwarding_pairs_model_and_session_and_recovers_from_401s(
                 crate::proxy::handler_context::StreamingTimeoutConfig {
                     first_byte_timeout: 5,
                     idle_timeout: 5,
+                    keepalive_secs: 0,
+                    loop_guard: false,
                 },
                 None,
                 hook,

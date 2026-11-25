@@ -562,6 +562,9 @@ export const handlers = [
       cacheHitRate: 0,
     }),
   ),
+  http.post(`${TAURI_ENDPOINT}/agy_account_is_running`, () =>
+    HttpResponse.json(false),
+  ),
   http.post(`${TAURI_ENDPOINT}/auth_get_status`, async ({ request }) => {
     const { authProvider } = await withJson<{ authProvider: string }>(request);
     return success({

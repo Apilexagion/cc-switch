@@ -714,6 +714,7 @@ async fn check_in_flight_failover_preserves_manual_route(disable_failover: bool)
             "Claude",
             "claude",
             None,
+            None,
         )
     };
     let forward = async |ctx: &RequestContext| {
