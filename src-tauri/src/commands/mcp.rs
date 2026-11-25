@@ -104,3 +104,54 @@ pub async fn resync_mcp_to_apps(
     }
     Ok(outcomes)
 }
+
+#[tauri::command]
+pub async fn list_mcp_tools(
+    state: State<'_, AppState>,
+    id: String,
+    app: String,
+) -> Result<serde_json::Value, String> {
+    use crate::services::mcp_tool_policy as policy;
+    let field = policy::field(&app).map_err(|e| e.to_string())?;
+    let mut rows = state.db.get_all_mcp_servers().map_err(|e| e.to_string())?;
+    let server = rows.shift_remove(&id).ok_or("Unknown MCP server")?;
+    let native = server
+        .server
+        .get(field)
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let disabled = policy::listed(&app, &id).map_err(|e| e.to_string())?;
+    let names = crate::services::mcp_connectivity::tool_names(server.server).await?;
+    Ok(serde_json::json!({"names":names,"disabled":disabled,"native":native}))
+}
+#[tauri::command]
+pub async fn set_mcp_tool_blocked(
+    state: State<'_, AppState>,
+    id: String,
+    app: String,
+    name: String,
+    blocked: bool,
+) -> Result<(), String> {
+    let ty = match app.as_str() {
+        "codex" => AppType::Codex,
+        "gemini" => AppType::Gemini,
+        _ => return Err("Unsupported native tool policy".into()),
+    };
+    let _switch = crate::mode::controller::lock_settled(&state, &ty)
+        .await
+        .map_err(|e| e.to_string())?;
+    let servers = state.db.get_all_mcp_servers().map_err(|e| e.to_string())?;
+    let s = servers.get(&id).ok_or("Unknown MCP server")?;
+    crate::services::mcp_tool_policy::change(&app, &id, &name, blocked, || {
+        if !s.apps.is_enabled_for(&ty) {
+            return Ok(());
+        }
+        if ty == AppType::Codex {
+            crate::mcp::sync_single_server_to_codex(&id, &s.server)
+        } else {
+            crate::mcp::sync_single_server_to_gemini(&id, &s.server)
+        }
+    })
+    .map_err(|e| e.to_string())
+}

@@ -76,3 +76,5 @@ pub mod workbuddy_account;
 pub(crate) mod sync_review;
 
 pub(crate) mod checkout_library;
+
+pub(crate) mod mcp_tool_policy;

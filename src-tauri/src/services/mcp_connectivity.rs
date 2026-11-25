@@ -114,17 +114,31 @@ async fn check_server(value: serde_json::Value, timeout: Duration) -> Connectivi
     // Do not return/log transport errors: URLs, headers and process arguments may
     // contain credentials. The UI only needs the coarse status.
     let unauthorized = Arc::new(AtomicBool::new(false));
-    match tokio::time::timeout(timeout, connect(value, unauthorized.clone())).await {
-        Ok(Ok(())) => ConnectivityStatus::Connected,
+    match tokio::time::timeout(timeout, connect(value, unauthorized.clone(), false)).await {
+        Ok(Ok(_)) => ConnectivityStatus::Connected,
         _ if unauthorized.load(Ordering::Relaxed) => ConnectivityStatus::AuthRequired,
         _ => ConnectivityStatus::Failed,
     }
 }
 
+/// Explicit user action. Only list tool names; never call a tool, return its
+/// schema/arguments or expose a backend's credential-bearing transport errors.
+pub(crate) async fn tool_names(value: serde_json::Value) -> Result<Vec<String>, String> {
+    let auth = Arc::new(AtomicBool::new(false));
+    let _permit = CHECK_PERMITS
+        .try_acquire()
+        .map_err(|_| "MCP probes are busy; try again")?;
+    match tokio::time::timeout(CHECK_TIMEOUT, connect(value, auth.clone(), true)).await {
+        Ok(Ok(names)) => Ok(names),
+        _ if auth.load(Ordering::Relaxed) => Err("MCP sign-in required".into()),
+        _ => Err("Cannot list MCP tools (unavailable, too many, or time limit reached)".into()),
+    }
+}
 async fn connect(
     value: serde_json::Value,
     unauthorized: Arc<AtomicBool>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    list: bool,
+) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
     let spec: ConnectionSpec = serde_json::from_value(value)?;
     let transport = spec.transport.as_deref().unwrap_or_else(|| {
         if spec.url.is_some() && spec.command.is_none() {
@@ -180,7 +194,7 @@ async fn connect(
             let child = process.0.as_mut().unwrap().inner_mut();
             let stdout = child.stdout().take().ok_or("Missing MCP stdout")?;
             let stdin = child.stdin().take().ok_or("Missing MCP stdin")?;
-            let result = handshake(AsyncRwTransport::new_client(stdout, stdin)).await;
+            let result = handshake(AsyncRwTransport::new_client(stdout, stdin), list).await;
             drop(process);
             result
         }
@@ -213,7 +227,7 @@ async fn connect(
                     },
                 )
                 .await?;
-                handshake(transport).await
+                handshake(transport, list).await
             } else {
                 let transport = StreamableHttpClientTransport::with_client(
                     UnauthorizedAwareClient {
@@ -225,7 +239,7 @@ async fn connect(
                         ..StreamableHttpClientTransportConfig::with_uri(url)
                     },
                 );
-                handshake(transport).await
+                handshake(transport, list).await
             }
         }
         _ => Err("Unsupported MCP transport".into()),
@@ -260,7 +274,8 @@ impl Drop for ProbeProcess {
 
 async fn handshake<T: Transport<RoleClient> + 'static>(
     transport: T,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    list: bool,
+) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
     let client = ClientInfo {
         client_info: Implementation {
             name: "cc-switch-connectivity".into(),
@@ -272,8 +287,36 @@ async fn handshake<T: Transport<RoleClient> + 'static>(
     // serve performs initialize + notifications/initialized. No tools are called.
     let service = client.serve(transport).await?;
     // A drop guard also closes the transport if the page leaves or we time out.
+    let mut names = std::collections::BTreeSet::new();
+    if list {
+        let mut cursor = None;
+        let mut seen = std::collections::HashSet::new();
+        loop {
+            let page = service
+                .list_tools(Some(rmcp::model::PaginatedRequestParam { cursor }))
+                .await?;
+            if names.len() + page.tools.len() > 512 {
+                return Err("MCP tool list limit".into());
+            }
+            for t in page.tools {
+                let n = t.name.as_ref();
+                if n.len() <= 128
+                    && !n.is_empty()
+                    && n.bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b"_.-".contains(&b))
+                {
+                    names.insert(n.to_owned());
+                }
+            }
+            let Some(next) = page.next_cursor else { break };
+            if seen.len() >= 16 || !seen.insert(next.clone()) {
+                return Err("Invalid MCP pagination".into());
+            }
+            cursor = Some(next);
+        }
+    }
     let _ = service.cancel().await;
-    Ok(())
+    Ok(names.into_iter().collect())
 }
 
 fn is_unauthorized(error: &reqwest::Error) -> bool {

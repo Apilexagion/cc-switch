@@ -131,4 +131,4 @@ pub(crate) use misc::tool_process::{
 };
 pub(crate) use misc::tool_version::local_tool_version;
 
-pub use sync_support::{preview_sync_download, undo_sync_download};
+pub use sync_support::*;

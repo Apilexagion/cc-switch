@@ -6117,6 +6117,9 @@
     "worktrees": "应用到本仓库当前所有工作树",
     "skillIndex": "Skills 按需加载（只写目录索引）",
     "preview": "预览差异",
-    "apply": "应用已预览的改动"
+    "apply": "应用已预览的改动",
+    "toolPolicy": "按客户端启停工具",
+    "toolNote": "手动发现会连接已保存的服务，stdio 服务会启动进程；不会调用任何工具。变更立即保存到本机。仅对 Codex / Gemini CLI 生效；灰色项由原配置禁用。",
+    "listTools": "连接并列出工具"
   }
 }

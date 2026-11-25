@@ -1,3 +1,4 @@
+import { ToolPicker } from "./ToolPicker";
 import React, { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "@/lib/toast";
@@ -1207,6 +1208,7 @@ const McpFormModal: React.FC<McpFormModalProps> = ({
             </>
           )}
 
+          {editingId && <ToolPicker key={editingId} id={editingId} />}
           <div
             role="group"
             aria-labelledby="mcp-apps-label"

@@ -318,7 +318,8 @@ pub fn sync_enabled_servers_to_codex_config_text(
         for id in ids {
             let spec = enabled.get(&id).expect("spec must exist");
             // 复用通用转换函数（已包含扩展字段支持）
-            match json_server_to_codex_toml_table(spec) {
+            let effective = crate::services::mcp_tool_policy::effective("codex", &id, spec)?;
+            match json_server_to_codex_toml_table(&effective) {
                 Ok(table) => {
                     servers_tbl[&id[..]] = Item::Table(table);
                 }
@@ -436,7 +437,8 @@ pub fn sync_single_server_to_codex(id: &str, server_spec: &Value) -> Result<(), 
     }
 
     // 将 JSON 服务器规范转换为 TOML 表
-    let toml_table = json_server_to_codex_toml_table(server_spec)?;
+    let effective = crate::services::mcp_tool_policy::effective("codex", id, server_spec)?;
+    let toml_table = json_server_to_codex_toml_table(&effective)?;
     upsert_mcp_server_table(&mut doc, id, toml_table)?;
 
     // 写回文件

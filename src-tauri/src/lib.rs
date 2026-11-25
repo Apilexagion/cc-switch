@@ -1749,6 +1749,8 @@ pub fn run() {
             commands::get_mcp_servers,
             commands::get_unreadable_mcp_servers,
             commands::start_mcp_connectivity_checks,
+            commands::list_mcp_tools,
+            commands::set_mcp_tool_blocked,
             commands::cancel_mcp_connectivity_checks,
             commands::upsert_mcp_server,
             commands::delete_mcp_server,

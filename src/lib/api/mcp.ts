@@ -8,7 +8,18 @@ export interface McpConnectivityResult {
   status: "connected" | "authRequired" | "failed";
 }
 
+export interface ToolNames {
+  names: string[];
+  disabled: string[];
+  native: string[];
+}
 export const mcpApi = {
+  listTools(id: string, app: string) {
+    return invoke<ToolNames>("list_mcp_tools", { id, app });
+  },
+  setToolBlocked(id: string, app: string, name: string, blocked: boolean) {
+    return invoke<void>("set_mcp_tool_blocked", { id, app, name, blocked });
+  },
   async startConnectivityChecks(
     serverIds: string[],
     onResult: (result: McpConnectivityResult) => void,

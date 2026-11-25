@@ -95,7 +95,10 @@ pub fn sync_single_server_to_gemini(id: &str, server_spec: &Value) -> Result<(),
     let mut current = crate::gemini_mcp::read_mcp_servers_map()?;
 
     // 添加/更新当前服务器
-    current.insert(id.to_string(), server_spec.clone());
+    current.insert(
+        id.to_string(),
+        crate::services::mcp_tool_policy::effective("gemini", id, server_spec)?,
+    );
 
     // 写回
     crate::gemini_mcp::set_mcp_servers_map(&current)

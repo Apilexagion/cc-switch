@@ -196,8 +196,11 @@ fn assets(db: &Database, b: &Binding, app: &AppType) -> Result<Assets, String> {
                 t.insert(
                     &s.id,
                     toml_edit::Item::Table(
-                        crate::mcp::codex::json_server_to_codex_toml_table(&s.server)
-                            .map_err(|_| "Invalid Codex MCP configuration")?,
+                        crate::mcp::codex::json_server_to_codex_toml_table(
+                            &super::mcp_tool_policy::effective("codex", id, &s.server)
+                                .map_err(er)?,
+                        )
+                        .map_err(|_| "Invalid Codex MCP configuration")?,
                     ),
                 );
             }
