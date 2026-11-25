@@ -15,7 +15,7 @@ use std::{
 
 #[derive(Clone, Copy)]
 pub(crate) enum Pull<'a> {
-    Preview,
+    Preview { upload: bool },
     Apply(Option<&'a str>),
 }
 struct UndoPoint {
@@ -28,7 +28,7 @@ fn err(e: impl std::fmt::Display) -> AppError {
 }
 // The second line in our own SQL dump is the wall-clock export time. Never
 // ignore a line in the body (a quoted multi-line cell can contain comments).
-fn key(sql: &[u8], zip: &[u8]) -> String {
+pub(crate) fn sql_hash(sql: &[u8]) -> String {
     let mut input = sql.splitn(3, |b| *b == b'\n');
     let first = input.next();
     let second = input.next();
@@ -39,7 +39,13 @@ fn key(sql: &[u8], zip: &[u8]) -> String {
     } else {
         sql
     };
-    sha256_hex(format!("{}:{}", sha256_hex(stable), sha256_hex(zip)).as_bytes())
+    sha256_hex(stable)
+}
+pub(crate) fn key_parts(sql_digest: &str, skills_digest: &str) -> String {
+    sha256_hex(format!("{sql_digest}:{skills_digest}").as_bytes())
+}
+fn key(sql: &[u8], zip: &[u8]) -> String {
+    key_parts(&sql_hash(sql), &sha256_hex(zip))
 }
 type Items = BTreeMap<(String, String), (String, String)>;
 fn inventory(sql: &[u8], archive: &[u8]) -> Result<Items, AppError> {
@@ -131,6 +137,29 @@ fn differences(a: &Items, b: &Items) -> (usize, Vec<Value>) {
     }
     (count, rows)
 }
+pub(crate) fn review_token(
+    sql: &[u8],
+    zip: &[u8],
+    manifest: &[u8],
+    destination: &str,
+    upload: bool,
+) -> String {
+    sha256_hex(
+        format!(
+            "{upload}:{destination}:{}:{}",
+            key(sql, zip),
+            sha256_hex(manifest)
+        )
+        .as_bytes(),
+    )
+}
+pub(crate) fn empty_upload(db: &Database, destination: &str) -> Result<Value, AppError> {
+    let local = build_local_snapshot(db)?;
+    let token = review_token(&local.db_sql, &local.skills_zip, &[], destination, true);
+    let (total, changes) =
+        differences(&Items::new(), &inventory(&local.db_sql, &local.skills_zip)?);
+    Ok(json!({"total":total,"changes":changes,"token":token}))
+}
 pub(crate) fn pull(
     db: &Database,
     sql: &[u8],
@@ -140,19 +169,22 @@ pub(crate) fn pull(
     intent: Pull<'_>,
 ) -> Result<Option<Value>, AppError> {
     let local = build_local_snapshot(db)?;
-    let token = sha256_hex(
-        format!(
-            "{backend}:{}:{}",
-            key(&local.db_sql, &local.skills_zip),
-            sha256_hex(manifest)
-        )
-        .as_bytes(),
+    let token = review_token(
+        &local.db_sql,
+        &local.skills_zip,
+        manifest,
+        backend,
+        matches!(intent, Pull::Preview { upload: true }),
     );
     match intent {
-        Pull::Preview => {
+        Pull::Preview { upload } => {
             let a = inventory(&local.db_sql, &local.skills_zip)?;
             let b = inventory(sql, zip)?;
-            let (count, changes) = differences(&a, &b);
+            let (count, changes) = if upload {
+                differences(&b, &a)
+            } else {
+                differences(&a, &b)
+            };
             return Ok(Some(json!({"token":token,"total":count,"changes":changes})));
         }
         Pull::Apply(Some(want)) if want != token => {
@@ -165,16 +197,16 @@ pub(crate) fn pull(
     let dir = tempfile::tempdir().map_err(err)?;
     crate::config::atomic_write_private(&dir.path().join("database.sql"), &local.db_sql)?;
     crate::config::atomic_write_private(&dir.path().join("skills.zip"), &local.skills_zip)?;
-    apply_snapshot(db, sql, zip)?;
-    // Never report a committed restore as failed merely because preparing undo failed.
-    let next = build_local_snapshot(db).map(|s| UndoPoint {
+    let after = apply_snapshot(
+        db,
+        sql,
+        zip,
+        Some((&sql_hash(&local.db_sql), &sha256_hex(&local.skills_zip))),
+    )?;
+    *UNDO.lock_recover() = after.map(|post| UndoPoint {
         directory: dir,
-        post: key(&s.db_sql, &s.skills_zip),
+        post,
     });
-    let mut undo = UNDO.lock_recover();
-    *undo = next
-        .map_err(|e| log::warn!("Sync applied, undo unavailable: {e}"))
-        .ok();
     Ok(None)
 }
 pub(crate) fn undo(db: &Database) -> Result<(), AppError> {
@@ -188,7 +220,12 @@ pub(crate) fn undo(db: &Database) -> Result<(), AppError> {
     }
     let sql = fs::read(u.directory.path().join("database.sql")).map_err(err)?;
     let zip = fs::read(u.directory.path().join("skills.zip")).map_err(err)?;
-    apply_snapshot(db, &sql, &zip)?;
+    apply_snapshot(
+        db,
+        &sql,
+        &zip,
+        Some((&sql_hash(&now.db_sql), &sha256_hex(&now.skills_zip))),
+    )?;
     *slot = None;
     Ok(())
 }

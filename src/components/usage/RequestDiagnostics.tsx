@@ -154,7 +154,7 @@ export function RequestDiagnostics({ requestId }: { requestId: string }) {
               <strong>{t("magpiePorts.routing")}</strong>
               {record.route.map(([provider, reason], i) => (
                 <div key={i}>
-                  {provider} · {t("magpiePorts.route_" + reason)}
+                  {provider} · {t(`magpiePorts.route_${reason}`)}
                 </div>
               ))}
             </div>
@@ -226,7 +226,7 @@ export function RequestDiagnostics({ requestId }: { requestId: string }) {
                           ] as const
                         ).map((k) => (
                           <div key={k} className="flex justify-between">
-                            <dt>{t("magpiePorts.part_" + k)}</dt>
+                            <dt>{t(`magpiePorts.part_${k}`)}</dt>
                             <dd>{attempt.context![k].toLocaleString()} B</dd>
                           </div>
                         ))}

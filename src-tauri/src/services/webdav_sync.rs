@@ -58,6 +58,20 @@ pub async fn upload(
     db: &crate::database::Database,
     settings: &mut WebDavSyncSettings,
 ) -> Result<Value, AppError> {
+    upload_checked(db, settings, None).await
+}
+pub(crate) fn destination(s: &WebDavSyncSettings) -> String {
+    sha256_hex(
+        serde_json::json!(["webdav", s.base_url, s.username, s.remote_root, s.profile])
+            .to_string()
+            .as_bytes(),
+    )
+}
+pub(crate) async fn upload_checked(
+    db: &crate::database::Database,
+    settings: &mut WebDavSyncSettings,
+    token: Option<&str>,
+) -> Result<Value, AppError> {
     settings.validate()?;
     let auth = auth_for(settings);
     let dir_segs = remote_dir_segments(settings, RemoteLayout::Current);
@@ -72,6 +86,31 @@ pub async fn upload(
             .as_ref()
             .map(|(bytes, etag)| (bytes.as_slice(), etag.as_deref())),
     );
+    if let Some(receipt) = token {
+        let remote_bytes = remote
+            .as_ref()
+            .map_or(&[][..], |(bytes, _)| bytes.as_slice());
+        if receipt
+            != crate::services::sync_review::review_token(
+                &snapshot.db_sql,
+                &snapshot.skills_zip,
+                remote_bytes,
+                &destination(settings),
+                true,
+            )
+        {
+            return Err(AppError::Message(
+                "The upload preview changed. Review the remote and local changes again.".into(),
+            ));
+        }
+        if condition.is_none() {
+            return Err(AppError::Message(
+                "The server did not supply a strong ETag; refusing an unguarded replacement."
+                    .into(),
+            ));
+        }
+    }
+
     let mut snapshot_dir = dir_segs;
     snapshot_dir.extend(["snapshots".to_string(), snapshot.snapshot_id.clone()]);
     ensure_remote_directories(&settings.base_url, &snapshot_dir, &auth).await?;
@@ -184,7 +223,7 @@ pub(crate) async fn download(
         &db_sql,
         &skills_zip,
         &snapshot.manifest_bytes,
-        "webdav",
+        &destination(settings),
         intent,
     )? {
         return Ok(preview);

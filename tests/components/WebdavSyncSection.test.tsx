@@ -81,7 +81,7 @@ const { settingsApiMock } = vi.hoisted(() => ({
     webdavSyncFetchRemoteInfo: vi.fn(),
     webdavSyncUpload: vi.fn(),
     webdavSyncDownload: vi.fn(),
-    previewSyncDownload: vi.fn(),
+    previewSyncChanges: vi.fn(),
     undoSyncDownload: vi.fn(),
     webdavSyncClearSettings: vi.fn(),
     s3TestConnection: vi.fn(),
@@ -147,7 +147,7 @@ describe("WebdavSyncSection", () => {
     settingsApiMock.webdavSyncFetchRemoteInfo.mockReset();
     settingsApiMock.webdavSyncUpload.mockReset();
     settingsApiMock.webdavSyncDownload.mockReset();
-    settingsApiMock.previewSyncDownload
+    settingsApiMock.previewSyncChanges
       .mockReset()
       .mockResolvedValue({ token: "previewed-id", total: 0, changes: [] });
     settingsApiMock.webdavSyncClearSettings.mockReset();

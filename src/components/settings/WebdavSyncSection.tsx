@@ -660,6 +660,7 @@ export function WebdavSyncSection({
       } else {
         setRemoteInfo(info);
       }
+      setPlan(await settingsApi.previewSyncChanges("webdav", true));
       setDialogType("upload");
     } catch {
       setRemoteInfo(null);
@@ -679,7 +680,8 @@ export function WebdavSyncSection({
     closeDialog();
     setActionState("uploading");
     try {
-      await settingsApi.webdavSyncUpload();
+      if (!plan) throw new Error(t("magpiePorts.planRequired"));
+      await settingsApi.webdavSyncUpload(plan.token);
       toast.success(t("settings.webdavSync.uploadSuccess"));
       await queryClient.invalidateQueries();
     } catch (error) {
@@ -691,7 +693,7 @@ export function WebdavSyncSection({
     } finally {
       setActionState("idle");
     }
-  }, [closeDialog, dirty, queryClient, t]);
+  }, [plan, closeDialog, dirty, queryClient, t]);
 
   /** Fetch remote info, then open download confirmation dialog. */
   const handleDownloadClick = useCallback(async () => {
@@ -718,7 +720,7 @@ export function WebdavSyncSection({
         return;
       }
       setRemoteInfo(info);
-      setPlan(await settingsApi.previewSyncDownload("webdav"));
+      setPlan(await settingsApi.previewSyncChanges("webdav"));
       setDialogType("download");
     } catch (error) {
       toast.error(
@@ -915,6 +917,7 @@ export function WebdavSyncSection({
       } else {
         setS3RemoteInfo(info);
       }
+      setPlan(await settingsApi.previewSyncChanges("s3", true));
       setS3DialogType("upload");
     } catch {
       setS3RemoteInfo(null);
@@ -933,7 +936,8 @@ export function WebdavSyncSection({
     closeS3Dialog();
     setS3ActionState("uploading");
     try {
-      await settingsApi.s3SyncUpload();
+      if (!plan) throw new Error(t("magpiePorts.planRequired"));
+      await settingsApi.s3SyncUpload(plan.token);
       toast.success(t("settings.s3Sync.uploadSuccess"));
       await queryClient.invalidateQueries();
     } catch (error) {
@@ -945,7 +949,7 @@ export function WebdavSyncSection({
     } finally {
       setS3ActionState("idle");
     }
-  }, [closeS3Dialog, s3Dirty, queryClient, t]);
+  }, [plan, closeS3Dialog, s3Dirty, queryClient, t]);
 
   const handleS3DownloadClick = useCallback(async () => {
     if (s3Dirty) {
@@ -968,7 +972,7 @@ export function WebdavSyncSection({
         return;
       }
       setS3RemoteInfo(info);
-      setPlan(await settingsApi.previewSyncDownload("s3"));
+      setPlan(await settingsApi.previewSyncChanges("s3"));
       setS3DialogType("download");
     } catch (error) {
       toast.error(
@@ -1721,6 +1725,7 @@ export function WebdavSyncSection({
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 text-sm leading-relaxed">
+                {planView}
                 <p>{t("settings.webdavSync.confirmUpload.content")}</p>
                 <ul className="list-disc pl-5 space-y-1 text-fg-2">
                   <li>{t("settings.webdavSync.confirmUpload.dbItem")}</li>
@@ -1883,6 +1888,7 @@ export function WebdavSyncSection({
             </DialogTitle>
             <DialogDescription asChild>
               <div className="space-y-3 text-sm leading-relaxed">
+                {planView}
                 <p>{t("settings.s3Sync.confirmUpload.content")}</p>
                 <ul className="list-disc pl-5 space-y-1 text-fg-2">
                   <li>{t("settings.s3Sync.confirmUpload.dbItem")}</li>

@@ -34,9 +34,11 @@ pub(crate) trait SyncBackend {
     fn check_connection(
         settings: &Self::Settings,
     ) -> impl Future<Output = Result<(), AppError>> + Send + '_;
+    fn destination(s: &Self::Settings) -> String;
     fn upload<'a>(
         db: &'a Database,
         settings: &'a mut Self::Settings,
+        token: Option<&'a str>,
     ) -> impl Future<Output = Result<Value, AppError>> + Send + 'a;
     fn download<'a>(
         db: &'a Database,
@@ -131,11 +133,14 @@ pub(crate) async fn test_connection<B: SyncBackend>(
     .map_err(|e| e.to_string())
 }
 
-pub(crate) async fn sync_upload<B: SyncBackend>(state: &AppState) -> Result<Value, String> {
+pub(crate) async fn sync_upload<B: SyncBackend>(
+    state: &AppState,
+    token: Option<String>,
+) -> Result<Value, String> {
     let db = state.db.clone();
     run_with_sync_lock(async {
         let mut settings = require_enabled_settings::<B>().map_err(AppError::Message)?;
-        let result = B::upload(&db, &mut settings).await;
+        let result = B::upload(&db, &mut settings, token.as_deref()).await;
         map_sync_result(result, |error| {
             persist_sync_error::<B>(&mut settings, error, "manual")
         })
@@ -145,13 +150,23 @@ pub(crate) async fn sync_upload<B: SyncBackend>(state: &AppState) -> Result<Valu
     .map_err(|e| e.to_string())
 }
 
-async fn preview<B: SyncBackend>(state: &AppState) -> Result<Value, String> {
+async fn preview<B: SyncBackend>(state: &AppState, upload: bool) -> Result<Value, String> {
     run_with_sync_lock(async {
         let mut settings = require_enabled_settings::<B>().map_err(AppError::Message)?;
+        if upload
+            && !B::fetch_remote_info(&settings)
+                .await?
+                .is_some_and(|info| info["layout"] == "current")
+        {
+            return crate::services::sync_review::empty_upload(
+                &state.db,
+                &B::destination(&settings),
+            );
+        }
         B::download(
             &state.db,
             &mut settings,
-            crate::services::sync_review::Pull::Preview,
+            crate::services::sync_review::Pull::Preview { upload },
         )
         .await
     })
@@ -159,13 +174,14 @@ async fn preview<B: SyncBackend>(state: &AppState) -> Result<Value, String> {
     .map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub async fn preview_sync_download(
+pub async fn preview_sync_changes(
     state: tauri::State<'_, AppState>,
     backend: String,
+    upload: bool,
 ) -> Result<Value, String> {
     match backend.as_str() {
-        "webdav" => preview::<super::webdav_sync::WebDavBackend>(&state).await,
-        "s3" => preview::<super::s3_sync::S3Backend>(&state).await,
+        "webdav" => preview::<super::webdav_sync::WebDavBackend>(&state, upload).await,
+        "s3" => preview::<super::s3_sync::S3Backend>(&state, upload).await,
         _ => Err("Unknown sync backend".into()),
     }
 }
@@ -587,7 +603,7 @@ mod tests {
         let db = Database::memory().expect("database");
         let state = AppState::new(Arc::new(db));
         let guard = sync_mutex().lock().await;
-        let upload = sync_upload::<B>(&state);
+        let upload = sync_upload::<B>(&state, None);
         tokio::pin!(upload);
 
         assert!(

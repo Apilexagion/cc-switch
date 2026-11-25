@@ -52,8 +52,15 @@ impl SyncBackend for WebDavBackend {
     async fn check_connection(settings: &WebDavSyncSettings) -> Result<(), AppError> {
         webdav_sync_service::check_connection(settings).await
     }
-    async fn upload(db: &Database, settings: &mut WebDavSyncSettings) -> Result<Value, AppError> {
-        webdav_sync_service::upload(db, settings).await
+    fn destination(s: &WebDavSyncSettings) -> String {
+        webdav_sync_service::destination(s)
+    }
+    async fn upload<'a>(
+        db: &'a Database,
+        settings: &'a mut WebDavSyncSettings,
+        token: Option<&'a str>,
+    ) -> Result<Value, AppError> {
+        webdav_sync_service::upload_checked(db, settings, token).await
     }
     async fn download<'a>(
         db: &'a Database,
@@ -76,8 +83,11 @@ pub async fn webdav_test_connection(
 }
 
 #[tauri::command]
-pub async fn webdav_sync_upload(state: State<'_, AppState>) -> Result<Value, String> {
-    sync_support::sync_upload::<WebDavBackend>(&state).await
+pub async fn webdav_sync_upload(
+    state: State<'_, AppState>,
+    token: Option<String>,
+) -> Result<Value, String> {
+    sync_support::sync_upload::<WebDavBackend>(&state, token).await
 }
 
 #[tauri::command]

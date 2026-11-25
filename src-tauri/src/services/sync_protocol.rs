@@ -499,7 +499,8 @@ pub(crate) fn apply_snapshot(
     db: &crate::database::Database,
     db_sql: &[u8],
     skills_zip: &[u8],
-) -> Result<(), AppError> {
+    expected: Option<(&str, &str)>,
+) -> Result<Option<String>, AppError> {
     let sql_str = std::str::from_utf8(db_sql).map_err(|e| {
         localized(
             "sync.sql_not_utf8",
@@ -510,6 +511,19 @@ pub(crate) fn apply_snapshot(
     // Exclude installs, uninstalls, updates, and local projection while Skills
     // are backed up/replaced and the corresponding database snapshot is applied.
     let _skill_state_guard = skill_state_write_guard();
+    let skills_hash = || -> Result<String, AppError> {
+        let dir = tempfile::tempdir().map_err(|e| AppError::Message(e.to_string()))?;
+        let p = dir.path().join("current.zip");
+        zip_skills_ssot(&p)?;
+        Ok(sha256_hex(&fs::read(&p).map_err(|e| AppError::io(&p, e))?))
+    };
+    if let Some((_, skills)) = expected {
+        if skills_hash()? != skills {
+            return Err(AppError::Message(
+                "Local skills changed during sync; review again".into(),
+            ));
+        }
+    }
     let skills_backup = backup_current_skills()?;
 
     // Replace skills first, then import database; roll back skills on DB failure.
@@ -517,13 +531,20 @@ pub(crate) fn apply_snapshot(
         return Err(skills_backup.rollback_after_import_error(error));
     }
 
-    if let Err(db_err) = db.import_sql_string_for_sync(sql_str) {
-        return Err(skills_backup.rollback_after_import_error(db_err));
-    }
-
+    let applied = match expected {
+        Some((sql, _)) => db.import_reviewed_for_sync(sql_str, sql),
+        None => db.import_sql_string_for_sync(sql_str).map(|_| None),
+    };
+    let sql_hash = match applied {
+        Ok(hash) => hash,
+        Err(e) => return Err(skills_backup.rollback_after_import_error(e)),
+    };
     skills_backup.commit();
-
-    Ok(())
+    Ok(sql_hash.and_then(|sql| {
+        skills_hash()
+            .ok()
+            .map(|skills| super::sync_review::key_parts(&sql, &skills))
+    }))
 }
 
 // ─── Utilities ───────────────────────────────────────────────
@@ -780,10 +801,10 @@ mod tests {
         let ssot = crate::services::skill::SkillService::get_ssot_dir().unwrap();
         fs::write(ssot.join("marker.txt"), b"original").unwrap();
         let sql = db.export_sql_string_for_sync().unwrap();
-        assert!(apply_snapshot(&db, sql.as_bytes(), b"not a zip").is_err());
+        assert!(apply_snapshot(&db, sql.as_bytes(), b"not a zip", None).is_err());
         assert_eq!(fs::read(ssot.join("marker.txt")).unwrap(), b"original");
         let snapshot = build_local_snapshot(&db).unwrap();
-        assert!(apply_snapshot(&db, b"invalid SQL", &snapshot.skills_zip).is_err());
+        assert!(apply_snapshot(&db, b"invalid SQL", &snapshot.skills_zip, None).is_err());
         assert_eq!(fs::read(ssot.join("marker.txt")).unwrap(), b"original");
         assert!(!fs::read_dir(ssot.parent().unwrap())
             .unwrap()

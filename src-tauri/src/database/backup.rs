@@ -280,7 +280,40 @@ impl Database {
     where
         F: FnOnce() -> Result<(), AppError>,
     {
-        validate_sql_import_size(sql_raw.len() as u64, MAX_SQL_IMPORT_BYTES)?;
+        self.import_sql_guarded(
+            sql_raw,
+            preserve_tables,
+            None,
+            execution_timeout,
+            on_staging_ready,
+        )
+        .map(|(id, _)| id)
+    }
+    pub(crate) fn import_reviewed_for_sync(
+        &self,
+        sql: &str,
+        expected: &str,
+    ) -> Result<Option<String>, AppError> {
+        self.import_sql_guarded(
+            sql,
+            SYNC_PRESERVE_TABLES,
+            Some(expected),
+            SQL_IMPORT_EXECUTION_TIMEOUT,
+            || Ok(()),
+        )
+        .map(|(_, post)| post)
+    }
+    fn import_sql_guarded<F>(
+        &self,
+        sql_raw: &str,
+        preserve_tables: &[&str],
+        expected: Option<&str>,
+        execution_timeout: Duration,
+        on_staging_ready: F,
+    ) -> Result<(String, Option<String>), AppError>
+    where
+        F: FnOnce() -> Result<(), AppError>,
+    {
         let (_staging_file, temp_conn) = Self::stage_sync_sql(sql_raw, execution_timeout)?;
         on_staging_ready()?;
 
@@ -288,22 +321,33 @@ impl Database {
         // Keep one main-DB guard across the safety snapshot, local-table read,
         // and final replacement so neither the rollback point nor preserved
         // device-local rows can miss writes that arrived during staging.
-        let backup_path = {
+        let (backup_path, post) = {
             let mut main_conn = lock_conn!(self.conn);
+            if let Some(expected) = expected {
+                let present = Self::dump_sql(&main_conn, SYNC_SKIP_TABLES)?;
+                if crate::services::sync_review::sql_hash(present.as_bytes()) != expected {
+                    return Err(AppError::Message(
+                        "Local database changed during sync; review again".into(),
+                    ));
+                }
+            }
             let backup_path =
                 Self::backup_database_file_from_conn(&backup_file_guard, &main_conn, &[])?;
             if !preserve_tables.is_empty() {
                 Self::restore_tables(&main_conn, &temp_conn, preserve_tables)?;
             }
             self.replace_from_staging(&temp_conn, &mut main_conn, "替换主数据库")?;
-            backup_path
+            let post = expected
+                .and_then(|_| Self::dump_sql(&main_conn, SYNC_SKIP_TABLES).ok())
+                .map(|sql| crate::services::sync_review::sql_hash(sql.as_bytes()));
+            (backup_path, post)
         };
 
         let backup_id = backup_path
             .and_then(|p| p.file_stem().map(|s| s.to_string_lossy().to_string()))
             .unwrap_or_default();
 
-        Ok(backup_id)
+        Ok((backup_id, post))
     }
 
     // A preview and a restore use the very same SQL admission, guard, migration and
@@ -312,6 +356,7 @@ impl Database {
         sql_raw: &str,
         execution_timeout: Duration,
     ) -> Result<(NamedTempFile, Connection), AppError> {
+        validate_sql_import_size(sql_raw.len() as u64, MAX_SQL_IMPORT_BYTES)?;
         let sql_content = sql_raw.trim_start_matches('\u{feff}');
         Self::validate_cc_switch_sql_export(sql_content)?;
 

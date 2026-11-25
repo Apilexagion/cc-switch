@@ -49,8 +49,15 @@ impl SyncBackend for S3Backend {
     async fn check_connection(settings: &S3SyncSettings) -> Result<(), AppError> {
         s3_sync_service::check_connection(settings).await
     }
-    async fn upload(db: &Database, settings: &mut S3SyncSettings) -> Result<Value, AppError> {
-        s3_sync_service::upload(db, settings).await
+    fn destination(s: &S3SyncSettings) -> String {
+        s3_sync_service::destination(s)
+    }
+    async fn upload<'a>(
+        db: &'a Database,
+        settings: &'a mut S3SyncSettings,
+        token: Option<&'a str>,
+    ) -> Result<Value, AppError> {
+        s3_sync_service::upload_checked(db, settings, token).await
     }
     async fn download<'a>(
         db: &'a Database,
@@ -73,8 +80,11 @@ pub async fn s3_test_connection(
 }
 
 #[tauri::command]
-pub async fn s3_sync_upload(state: State<'_, AppState>) -> Result<Value, String> {
-    sync_support::sync_upload::<S3Backend>(&state).await
+pub async fn s3_sync_upload(
+    state: State<'_, AppState>,
+    token: Option<String>,
+) -> Result<Value, String> {
+    sync_support::sync_upload::<S3Backend>(&state, token).await
 }
 
 #[tauri::command]

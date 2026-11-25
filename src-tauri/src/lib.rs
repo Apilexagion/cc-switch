@@ -1818,7 +1818,7 @@ pub fn run() {
             commands::webdav_test_connection,
             commands::webdav_sync_upload,
             commands::webdav_sync_download,
-            commands::preview_sync_download,
+            commands::preview_sync_changes,
             commands::undo_sync_download,
             commands::webdav_sync_save_settings,
             commands::webdav_sync_clear_settings,

@@ -38,6 +38,28 @@ pub async fn upload(
     db: &crate::database::Database,
     settings: &mut S3SyncSettings,
 ) -> Result<Value, AppError> {
+    upload_checked(db, settings, None).await
+}
+pub(crate) fn destination(s: &S3SyncSettings) -> String {
+    sha256_hex(
+        serde_json::json!([
+            "s3",
+            s.endpoint,
+            s.region,
+            s.bucket,
+            s.remote_root,
+            s.profile,
+            s.access_key_id
+        ])
+        .to_string()
+        .as_bytes(),
+    )
+}
+pub(crate) async fn upload_checked(
+    db: &crate::database::Database,
+    settings: &mut S3SyncSettings,
+    token: Option<&str>,
+) -> Result<Value, AppError> {
     settings.validate()?;
     let creds = creds_for(settings);
 
@@ -50,6 +72,31 @@ pub async fn upload(
             .as_ref()
             .map(|(bytes, etag)| (bytes.as_slice(), etag.as_deref())),
     );
+    if let Some(receipt) = token {
+        let remote_bytes = remote
+            .as_ref()
+            .map_or(&[][..], |(bytes, _)| bytes.as_slice());
+        if receipt
+            != crate::services::sync_review::review_token(
+                &snapshot.db_sql,
+                &snapshot.skills_zip,
+                remote_bytes,
+                &destination(settings),
+                true,
+            )
+        {
+            return Err(AppError::Message(
+                "The upload preview changed. Review the remote and local changes again.".into(),
+            ));
+        }
+        if condition.is_none() {
+            return Err(AppError::Message(
+                "The server did not supply a strong ETag; refusing an unguarded replacement."
+                    .into(),
+            ));
+        }
+    }
+
     let db_key = s3_key(
         settings,
         &snapshot_artifact_path(&snapshot.snapshot_id, REMOTE_DB_SQL),
@@ -143,9 +190,14 @@ pub(crate) async fn download(
     let skills_zip =
         download_and_verify(settings, &creds, REMOTE_SKILLS_ZIP, &manifest, version).await?;
 
-    if let Some(preview) =
-        crate::services::sync_review::pull(db, &db_sql, &skills_zip, &manifest_bytes, "s3", intent)?
-    {
+    if let Some(preview) = crate::services::sync_review::pull(
+        db,
+        &db_sql,
+        &skills_zip,
+        &manifest_bytes,
+        &destination(settings),
+        intent,
+    )? {
         return Ok(preview);
     }
 
