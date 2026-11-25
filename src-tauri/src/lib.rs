@@ -1789,6 +1789,7 @@ pub fn run() {
             commands::get_omp_current_state,
             // Profile management (项目配置方案)
             commands::list_profiles,
+            commands::project_profile_library,
             commands::create_profile,
             commands::update_profile,
             commands::delete_profile,

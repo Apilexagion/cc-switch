@@ -74,3 +74,5 @@ pub mod session_usage_workbuddy;
 pub mod workbuddy_account;
 
 pub(crate) mod sync_review;
+
+pub(crate) mod checkout_library;

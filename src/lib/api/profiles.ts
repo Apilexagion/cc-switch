@@ -54,7 +54,25 @@ export interface ProfilesResponse {
   currentIds: CurrentProfileIds;
 }
 
+export type CheckoutBinding = {
+  root: string;
+  app: "claude" | "codex";
+  profile: string | null;
+  allWorktrees: boolean;
+  skillIndex: boolean;
+};
+export interface CheckoutPreview {
+  token: string;
+  checkouts: string[];
+  changes: { checkout: string; file: string; action: string }[];
+}
 export const profilesApi = {
+  projectLibrary(binding: CheckoutBinding, token?: string) {
+    return invoke<CheckoutPreview>("project_profile_library", {
+      binding,
+      token: token ?? null,
+    });
+  },
   /**
    * 获取所有项目及各分组当前激活项目 id
    */

@@ -230,16 +230,18 @@ async fn locked(state: &AppState, app: &AppType) -> Result<Preview, String> {
         AppType::Codex => {
             let members = published_members(state, app, &settled_stack(app)?, &route)?;
             let owner = live.codex_owner();
+            let proxy_target = codex_direct::Target::Proxy {
+                route: &route,
+                base_url: &cx_url,
+                stack: &members,
+            };
+            let direct_target = codex_direct::Target::Direct(direct);
             let opts = |t| {
                 codex_direct::inspect_configs(&state.db, &owner, t)
                     .map_err(|_| "Cannot project Codex configuration without changing it")
             };
-            let current = opts(&codex_direct::Target::Proxy {
-                route: &route,
-                base_url: &cx_url,
-                stack: &members,
-            })?;
-            let next = opts(&codex_direct::Target::Direct(direct))?;
+            let current = opts(&proxy_target)?;
+            let next = opts(&direct_target)?;
             let current: Vec<&dyn LivePatch> =
                 current.iter().map(|p| p as &dyn LivePatch).collect();
             let next: Vec<&dyn LivePatch> = next.iter().map(|p| p as &dyn LivePatch).collect();

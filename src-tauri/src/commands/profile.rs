@@ -205,3 +205,17 @@ pub async fn apply_profile(
     })
     .await
 }
+
+#[tauri::command]
+pub async fn project_profile_library(
+    state: State<'_, AppState>,
+    binding: crate::services::checkout_library::Binding,
+    token: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let db = state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::services::checkout_library::project(&db, binding, token.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}

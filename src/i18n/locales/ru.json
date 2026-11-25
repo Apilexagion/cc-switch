@@ -6105,6 +6105,16 @@
     "undoDone": "Local data restored",
     "syncDiff": "Resource changes: {{count}}",
     "syncScope": "Providers, prompts, MCP, skills and skill files (first 500). Other synced settings are also restored with the full snapshot.",
-    "planRequired": "Open the download preview again"
+    "planRequired": "Open the download preview again",
+    "checkout": "Bind resources to a Git checkout",
+    "checkoutNote": "Write profile resources only to the project. Global switches stay unchanged; existing user files are not overwritten. Exclude MCP config in .git/info/exclude first as it can contain credentials. Codex requires a trusted project.",
+    "checkoutDone": "Checkout resources updated",
+    "chooseRepo": "Select Git checkout root",
+    "client": "Client",
+    "unbind": "Unbind managed project resources",
+    "worktrees": "Include all current worktrees",
+    "skillIndex": "Load skills on demand (one index)",
+    "preview": "Preview changes",
+    "apply": "Apply reviewed changes"
   }
 }

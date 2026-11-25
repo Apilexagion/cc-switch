@@ -6107,6 +6107,16 @@
     "undoDone": "已还原本机同步前的数据",
     "syncDiff": "资源差异：{{count}} 项",
     "syncScope": "列出供应商、提示词、MCP、Skills 与技能文件（最多 500 行）。其他可同步设置也随完整快照恢复。",
-    "planRequired": "请重新打开下载预览"
+    "planRequired": "请重新打开下载预览",
+    "checkout": "绑定到 Git 项目",
+    "checkoutNote": "将选中档案的 MCP、Skills 和指令写入项目，不改变全局启用状态。不会覆盖已有用户文件。MCP 配置可能含凭据：请先将目标配置加入本仓库 .git/info/exclude。Codex 项目须由你手动信任。",
+    "checkoutDone": "已更新项目资源",
+    "chooseRepo": "选择 Git 工作树根目录",
+    "client": "客户端",
+    "unbind": "移除本应用已写入的资源",
+    "worktrees": "应用到本仓库当前所有工作树",
+    "skillIndex": "Skills 按需加载（只写目录索引）",
+    "preview": "预览差异",
+    "apply": "应用已预览的改动"
   }
 }

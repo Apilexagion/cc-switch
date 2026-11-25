@@ -1,3 +1,4 @@
+import { CheckoutLibrary } from "./CheckoutLibrary";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, Pencil, Trash2, X } from "lucide-react";
@@ -176,6 +177,7 @@ export function ProfileManageDialog({
               </div>
             ))}
           </div>
+          <CheckoutLibrary profiles={profiles} />
           <DialogFooter>
             <Button
               type="button"
