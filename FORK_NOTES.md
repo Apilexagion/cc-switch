@@ -55,6 +55,8 @@ Codex 都具有相同配置语义，也不测试模型请求或认证。桌面�
 
 ### 4. Magpie 功能适配
 
+新一批功能（配置体检、跨客户端接续、同步差异、工作树资源、按需工具与技能、路由诊断）见[使用说明和限制](docs/guides/magpie-ports-zh.md)。
+
 参考 [Magpie](https://github.com/yetone/magpie/tree/674b6ca2881f1289c4ccdec158762978a463320c)
 的交互与协议处理规则，在现有 Rust / React 架构中接入以下功能：
 

@@ -248,6 +248,61 @@ pub(crate) fn undo(db: &Database) -> Result<(), AppError> {
 mod tests {
     use super::*;
     #[test]
+    #[serial_test::serial]
+    fn preview_apply_and_undo_preserve_db_and_skill_files() {
+        let _home = crate::test_support::TestHome::new();
+        let db = Database::memory().unwrap();
+        let remote = Database::memory().unwrap();
+        remote.set_setting("review-fixture", "remote").unwrap();
+        db.set_setting("review-fixture", "local").unwrap();
+        let dir = crate::services::SkillService::get_ssot_dir().unwrap();
+        let file = dir.join("fixture.txt");
+        fs::write(&file, b"remote skill").unwrap();
+        let snap = build_local_snapshot(&remote).unwrap();
+        fs::write(&file, b"local skill").unwrap();
+        let view = pull(
+            &db,
+            &snap.db_sql,
+            &snap.skills_zip,
+            &snap.manifest_bytes,
+            "fixture",
+            Pull::Preview { upload: false },
+        )
+        .unwrap()
+        .unwrap();
+        assert!(view["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["name"] == "fixture.txt" && r["action"] == "change"));
+        assert_eq!(fs::read(&file).unwrap(), b"local skill");
+        let token = view["token"].as_str().unwrap();
+        pull(
+            &db,
+            &snap.db_sql,
+            &snap.skills_zip,
+            &snap.manifest_bytes,
+            "fixture",
+            Pull::Apply(Some(token)),
+        )
+        .unwrap();
+        assert_eq!(
+            db.get_setting("review-fixture").unwrap().as_deref(),
+            Some("remote")
+        );
+        assert_eq!(fs::read(&file).unwrap(), b"remote skill");
+        undo(&db).unwrap();
+        assert_eq!(
+            db.get_setting("review-fixture").unwrap().as_deref(),
+            Some("local")
+        );
+        assert_eq!(fs::read(&file).unwrap(), b"local skill");
+        let reverted = build_local_snapshot(&db).unwrap();
+        assert!(held_after_undo(&reverted.db_sql, &reverted.skills_zip));
+        assert!(undo(&db).is_err());
+        *LOCAL_UNDO.lock_recover() = None;
+    }
+    #[test]
     fn stale_review_cannot_replace_later_database_edits() {
         let db = Database::memory().unwrap();
         let before = db.export_sql_string_for_sync().unwrap();

@@ -32,6 +32,9 @@ fn load_index(app: &AppType) -> Result<IndexReceipt> {
 /// User-invoked-only skills remain direct; an index must not silently make
 /// them available for automatic invocation.
 pub(crate) fn indexable(path: &Path) -> Result<bool> {
+    if !fs::metadata(path)?.is_file() {
+        return Err(anyhow!("Expected a regular SKILL.md"));
+    }
     let mut bytes = vec![];
     fs::File::open(path)?.take(32_769).read_to_end(&mut bytes)?;
     let text = String::from_utf8_lossy(&bytes);
@@ -181,6 +184,36 @@ impl SkillService {
 #[cfg(test)]
 mod index_tests {
     use super::*;
+    #[test]
+    #[serial_test::serial]
+    fn global_index_is_reversible_and_leaves_user_edits_and_direct_entries_alone() {
+        let _home = crate::test_support::TestHome::new();
+        let db = Database::memory().unwrap();
+        let app = AppType::Claude;
+        let source = SkillService::get_ssot_dir().unwrap().join("fixture-skill");
+        fs::create_dir_all(&source).unwrap();
+        fs::write(
+            source.join("SKILL.md"),
+            "---\nname: fixture-skill\n---\nRead me",
+        )
+        .unwrap();
+        db.save_skill(&serde_json::from_value(json!({"id":"fixture","name":"fixture-skill","directory":"fixture-skill","apps":{},"installedAt":0,"updatedAt":0})).unwrap()).unwrap();
+        let native = SkillService::get_app_skills_dir(&app).unwrap();
+        let direct = native.join("fixture-skill");
+        fs::create_dir_all(&direct).unwrap();
+        fs::write(direct.join("local.txt"), "mine").unwrap();
+        SkillService::set_index(&db, &app, ["fixture".into()].into()).unwrap();
+        let p = native.join(INDEX).join("SKILL.md");
+        let before = fs::read(&p).unwrap();
+        assert!(String::from_utf8_lossy(&before).contains("fixture-skill"));
+        fs::write(&p, b"my edits").unwrap();
+        assert!(SkillService::set_index(&db, &app, Default::default()).is_err());
+        assert_eq!(fs::read(&p).unwrap(), b"my edits");
+        fs::write(&p, before).unwrap();
+        SkillService::set_index(&db, &app, Default::default()).unwrap();
+        assert!(!p.exists());
+        assert_eq!(fs::read(direct.join("local.txt")).unwrap(), b"mine");
+    }
     #[test]
     fn does_not_advertise_explicit_invocation_skills() {
         let d = tempfile::tempdir().unwrap();
