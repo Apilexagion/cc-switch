@@ -6120,6 +6120,25 @@
     "apply": "应用已预览的改动",
     "toolPolicy": "按客户端启停工具",
     "toolNote": "手动发现会连接已保存的服务，stdio 服务会启动进程；不会调用任何工具。变更立即保存到本机。仅对 Codex / Gemini CLI 生效；灰色项由原配置禁用。",
-    "listTools": "连接并列出工具"
+    "listTools": "连接并列出工具",
+    "routing": "实际选路记录",
+    "footprint": "发往上游的上下文构成（估算字节，非计费 token）",
+    "partial": "仅部分可见：历史在上游或达到采样上限",
+    "part_system": "系统/开发者指令",
+    "part_tools": "工具定义",
+    "part_chat": "对话/调用",
+    "part_results": "工具结果",
+    "part_media": "文件及媒体表示",
+    "route_stack": "Stack 指定路由",
+    "route_intent": "意图规则命中",
+    "route_current": "当前供应商",
+    "route_queue": "故障转移队列首选",
+    "route_keyScope": "网关 Key 排除了首选项",
+    "route_retryLimit": "已到尝试次数上限",
+    "route_capacity": "候选输入容量不足",
+    "route_accountBoundary": "不能跨官方账号继续",
+    "route_circuit": "熔断器未放行",
+    "route_retryable": "上游失败，继续尝试队列",
+    "route_inputLimit": "上游拒绝输入长度，切换候选"
   }
 }

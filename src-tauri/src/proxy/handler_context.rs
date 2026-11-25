@@ -280,6 +280,7 @@ impl RequestContext {
         );
 
         let is_stack = stack.is_some();
+        let mut selection_reason = if is_stack { "stack" } else { "current" };
         let (mut provider, mut providers, current_provider_id, request_model) = match stack {
             Some(target) => {
                 // Stack 模型：只发往 Stack 里的那一家，不读代理路由、不经熔断器选家。按「单家、
@@ -373,6 +374,15 @@ impl RequestContext {
 
                 // Stack 模式不做故障转移：只发往默认那家，和故障转移关着时一样跳过熔断器选家；
                 // 队列留着，回到路由模式恢复。故障转移本来就关着时不用读模式。
+                selection_reason = if stack_mode {
+                    "stack"
+                } else if intent_target.is_some() {
+                    "intent"
+                } else if app_config.auto_failover_enabled {
+                    "queue"
+                } else {
+                    "current"
+                };
                 let providers = if stack_mode {
                     app_config.auto_failover_enabled = false;
                     vec![routing_current.ok_or(ProxyError::NoProvidersConfigured)?]
@@ -457,7 +467,11 @@ impl RequestContext {
                 )));
             }
             if !ak.allowed_providers.is_empty() {
+                let previous = providers.first().map(|p| p.id.clone());
                 providers.retain(|p| ak.provider_allowed(&p.id));
+                if previous.as_deref() != providers.first().map(|p| p.id.as_str()) {
+                    selection_reason = "keyScope";
+                }
                 match providers.first().cloned() {
                     Some(p) => provider = p,
                     None => {
@@ -519,6 +533,9 @@ impl RequestContext {
                     == Some("true");
                 crate::proxy::diagnostics::DiagnosticHandle::new(capture, pii_redaction.clone())
             });
+        if let Some(d) = &diagnostics {
+            d.route(&provider.name, selection_reason);
+        }
         Ok(Self {
             diagnostics,
             start_time,

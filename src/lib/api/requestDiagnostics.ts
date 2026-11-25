@@ -16,10 +16,19 @@ export interface AttemptDiagnostics {
   statusCode: number | null;
   error: string | null;
   canceled: boolean;
+  context?: {
+    system: number;
+    tools: number;
+    chat: number;
+    results: number;
+    media: number;
+    partial: boolean;
+  } | null;
 }
 
 export interface RequestDiagnostics {
   traceId: string;
+  route?: [string, string][];
   captureBodies: boolean;
   requestBody: string;
   responseBody: string;

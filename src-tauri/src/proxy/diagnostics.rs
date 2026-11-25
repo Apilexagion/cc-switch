@@ -40,6 +40,7 @@ pub struct AttemptDiagnostics {
     pub status_code: Option<u16>,
     pub error: Option<String>,
     pub canceled: bool,
+    pub context: Option<super::context_usage::Footprint>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -55,6 +56,7 @@ pub struct RequestDiagnostics {
     pub response_truncated: bool,
     pub attempts: Vec<AttemptDiagnostics>,
     pub attempts_truncated: bool,
+    pub route: Vec<(String, String)>,
 }
 
 #[derive(Clone)]
@@ -136,6 +138,15 @@ impl DiagnosticHandle {
             .is_some_and(|recent| recent.iter().any(|entry| entry.trace_id == self.id))
     }
 
+    pub fn route(&self, provider: &str, reason: &'static str) {
+        self.update(|entry| {
+            if entry.route.len() < 48 {
+                entry
+                    .route
+                    .push((short(provider, FIELD_BYTES), reason.into()));
+            }
+        });
+    }
     pub fn bind(&self, request_id: &str) {
         self.update(|entry| {
             if entry.request_ids.len() < 4 && !entry.request_ids.iter().any(|id| id == request_id) {
@@ -207,7 +218,9 @@ impl AttemptGuard {
             .take(64)
             .map(|v| short(v, 4096))
             .collect();
+        let context = super::context_usage::measure(body);
         self.update(|attempt| {
+            attempt.context = Some(context);
             attempt.prepared_ms = Some(self.started.elapsed().as_millis() as u64);
             attempt.model = short(
                 body.get("model")

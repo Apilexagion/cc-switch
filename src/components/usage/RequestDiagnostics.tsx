@@ -149,6 +149,16 @@ export function RequestDiagnostics({ requestId }: { requestId: string }) {
         </p>
       ) : (
         <>
+          {!!record.route?.length && (
+            <div className="rounded-panel border border-border p-2 text-caption">
+              <strong>{t("magpiePorts.routing")}</strong>
+              {record.route.map(([provider, reason], i) => (
+                <div key={i}>
+                  {provider} · {t("magpiePorts.route_" + reason)}
+                </div>
+              ))}
+            </div>
+          )}
           <ol className="m-0 flex list-none flex-col gap-2 p-0">
             {record.attempts.map((attempt, index) => {
               const phases = attemptPhases(attempt);
@@ -201,6 +211,30 @@ export function RequestDiagnostics({ requestId }: { requestId: string }) {
                         ))}
                       </dl>
                     </>
+                  )}
+                  {attempt.context && (
+                    <div className="mt-2 text-caption">
+                      <strong>{t("magpiePorts.footprint")}</strong>
+                      <dl>
+                        {(
+                          [
+                            "system",
+                            "tools",
+                            "chat",
+                            "results",
+                            "media",
+                          ] as const
+                        ).map((k) => (
+                          <div key={k} className="flex justify-between">
+                            <dt>{t("magpiePorts.part_" + k)}</dt>
+                            <dd>{attempt.context![k].toLocaleString()} B</dd>
+                          </div>
+                        ))}
+                      </dl>
+                      {attempt.context.partial && (
+                        <p>{t("magpiePorts.partial")}</p>
+                      )}
+                    </div>
                   )}
                   {attempt.canceled && (
                     <p className="m-0 mt-2 text-caption text-fg-3">

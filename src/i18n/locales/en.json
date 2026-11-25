@@ -6120,6 +6120,25 @@
     "apply": "Apply reviewed changes",
     "toolPolicy": "Per-client tool controls",
     "toolNote": "Discovery connects to the saved server and starts it for stdio; no tools are executed. Changes save immediately on this device. Native enforcement: Codex / Gemini CLI only; grayed-out tools are disabled by the original config.",
-    "listTools": "Connect and list tools"
+    "listTools": "Connect and list tools",
+    "routing": "Routing decisions",
+    "footprint": "Outbound context by approximate bytes, not billed tokens",
+    "partial": "Partial: upstream-held history or sampling limit",
+    "part_system": "System / developer instructions",
+    "part_tools": "Tool definitions",
+    "part_chat": "Chat / calls",
+    "part_results": "Tool results",
+    "part_media": "Files / media representation",
+    "route_stack": "Pinned by stack",
+    "route_intent": "Intent rule matched",
+    "route_current": "Current provider",
+    "route_queue": "First eligible failover candidate",
+    "route_keyScope": "First choice excluded by gateway key",
+    "route_retryLimit": "Retry budget exhausted",
+    "route_capacity": "Candidate input window too small",
+    "route_accountBoundary": "Cannot switch to an official account",
+    "route_circuit": "Circuit breaker refused attempt",
+    "route_retryable": "Retryable failure; advance in queue",
+    "route_inputLimit": "Upstream rejected input length; try another candidate"
   }
 }

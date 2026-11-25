@@ -1200,6 +1200,11 @@ impl RequestForwarder {
         let bypass_circuit_breaker = providers.len() == 1 || !self.routing_state_enabled();
 
         // 依次尝试每个供应商
+        let decision = |provider: &Provider, reason| {
+            if let Some(d) = &self.diagnostics {
+                d.route(&provider.name, reason);
+            }
+        };
         for provider in providers.iter() {
             // 整流器重试标记：每个 provider 独立持有，避免标记跨 provider 短路故障转移
             // —— 首家 provider 整流后被 5xx/timeout 击落时，下家仍能用整流后的请求体走整流流程
@@ -1211,6 +1216,7 @@ impl RequestForwarder {
             // 上限检查：尊重用户在 AppProxyConfig.max_retries 上配置的「重试次数」。
             // 放在熔断器 allow 检查之前，避免在已经超限时还占用 HalfOpen 探测名额。
             if attempted_providers >= self.max_attempts {
+                decision(provider, "retryLimit");
                 log::warn!(
                     "[{app_type_str}] 已达最大尝试次数上限 ({}/{}), 停止故障转移",
                     attempted_providers,
@@ -1231,6 +1237,14 @@ impl RequestForwarder {
                     )
                 });
                 if super::providers::is_codex_official_provider(provider) || too_small {
+                    decision(
+                        provider,
+                        if too_small {
+                            "capacity"
+                        } else {
+                            "accountBoundary"
+                        },
+                    );
                     log::debug!(
                         "[{app_type_str}] 跳过输入容量不足或不允许接续的候选: {}",
                         provider.name
@@ -1254,6 +1268,7 @@ impl RequestForwarder {
             };
 
             if !allowed {
+                decision(provider, "circuit");
                 // 熔断器没放行（Open 未到恢复时间，或 HalfOpen 的探测名额被占用）：
                 // 这家没有发出请求，留一行日志，和「试了但失败」区分开。
                 log::info!(
@@ -1800,6 +1815,7 @@ impl RequestForwarder {
                         // It is neither an account-auth retry nor a broken provider:
                         // The attempt guard returns any half-open slot on
                         // continue; try the existing queue without a health penalty.
+                        decision(provider, "inputLimit");
                         input_limit_seen = true;
                         let failed_window = limit.limit.or_else(|| {
                             self.configured_input_window(app_type, provider, body.model())
@@ -1842,6 +1858,7 @@ impl RequestForwarder {
 
                             last_error = Some(e);
                             last_provider = Some(provider.clone());
+                            decision(provider, "retryable");
                             // 继续尝试下一个供应商
                             continue;
                         }
