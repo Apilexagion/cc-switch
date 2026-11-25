@@ -2001,6 +2001,7 @@ pub fn run() {
             commands::get_session_image,
             commands::reveal_session_path,
             commands::export_session_markdown,
+            commands::copy_session_to_other_agent,
             commands::delete_session,
             commands::delete_sessions,
             commands::launch_session_terminal,

@@ -503,6 +503,33 @@ export function SessionManagerPage({
     [copyText],
   );
 
+  const carrying = useRef(false);
+  const carrySession = async (session: SessionMeta) => {
+    if (carrying.current || !session.sourcePath || !canResumeSession(session))
+      return;
+    carrying.current = true;
+    try {
+      const copy = await sessionsApi.copyToOtherAgent(
+        session.providerId,
+        session.sessionId,
+        session.sourcePath,
+      );
+      toast.success(t("magpiePorts.copied"), {
+        description: copy.command,
+        action: {
+          label: t("sessionManager.copyResume", { defaultValue: "Copy" }),
+          onClick: () =>
+            handleCopy(copy.command, t("sessionManager.resumeCommandCopied")),
+        },
+      });
+      await refetch();
+    } catch (error) {
+      toast.error(extractErrorMessage(error) || t("common.error"));
+    } finally {
+      carrying.current = false;
+    }
+  };
+
   const handleLaunch = async (session: SessionMeta) => {
     if (!canResumeSession(session)) return;
     const command = session.resumeCommand;
@@ -845,6 +872,14 @@ export function SessionManagerPage({
         onOpenAt={(messageIndex) => openReader(session, messageIndex)}
         onToggleChecked={(checked) => toggleSelected(session, checked)}
         onStartSelect={() => enterSelection(session)}
+        onCarry={
+          canResumeSession(session) &&
+          !!session.sourcePath &&
+          !!session.projectDir &&
+          (session.providerId === "codex" || session.providerId === "claude")
+            ? () => void carrySession(session)
+            : undefined
+        }
         onLaunch={() => void handleLaunch(session)}
         onCopyResume={() =>
           canResumeSession(session) &&

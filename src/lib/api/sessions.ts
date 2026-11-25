@@ -38,6 +38,15 @@ export interface BlockContentPage {
 }
 
 export const sessionsApi = {
+  copyToOtherAgent(providerId: string, sessionId: string, sourcePath: string) {
+    return invoke<{
+      providerId: string;
+      sessionId: string;
+      sourcePath: string;
+      projectDir: string;
+      command: string;
+    }>("copy_session_to_other_agent", { providerId, sessionId, sourcePath });
+  },
   async list(): Promise<SessionMeta[]> {
     return await invoke("list_sessions");
   },

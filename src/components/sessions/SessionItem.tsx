@@ -91,6 +91,7 @@ interface SessionItemProps {
   onStartSelect: () => void;
   onLaunch: () => void;
   onCopyResume: () => void;
+  onCarry?: () => void;
   onCopyId: () => void;
   onCopySource: () => void;
   onDelete: () => void;
@@ -117,6 +118,7 @@ export function SessionItem({
   onStartSelect,
   onLaunch,
   onCopyResume,
+  onCarry,
   onCopyId,
   onCopySource,
   onDelete,
@@ -442,6 +444,19 @@ export function SessionItem({
                 align="end"
                 className="w-[210px] rounded-panel p-1 shadow-v7-md"
               >
+                {onCarry && (
+                  <DropdownMenuItem
+                    className={sessionMenuItemClass}
+                    onSelect={onCarry}
+                  >
+                    {t("magpiePorts.carry", {
+                      target:
+                        session.providerId === "claude"
+                          ? "Codex"
+                          : "Claude Code",
+                    })}
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   className={sessionMenuItemClass}
                   onSelect={onCopyId}

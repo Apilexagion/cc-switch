@@ -14,6 +14,19 @@ use crate::session_manager::model::{ContentRef, ImageRef, TranscriptChunk};
 mod transcript_tests;
 
 #[tauri::command]
+pub async fn copy_session_to_other_agent(
+    provider_id: String,
+    session_id: String,
+    source_path: String,
+) -> Result<session_manager::carry::CopyResult, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        session_manager::carry::copy(&provider_id, &session_id, &source_path)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 pub async fn list_sessions() -> Result<Vec<session_manager::SessionMeta>, String> {
     let sessions = tauri::async_runtime::spawn_blocking(session_manager::scan_sessions)
         .await
