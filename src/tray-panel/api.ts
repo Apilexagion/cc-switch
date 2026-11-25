@@ -15,6 +15,7 @@ export interface PanelTexts {
   openPanel: string;
   configTab: string;
   usageTab: string;
+  routeTab: string;
   /** 某一档还有多久重置：`{when}` 是下面几个单位拼出的时长 */
   resetsIn: string;
   /** 时长单位：`{n}` 是数字；最多取两级，中间用 `durationSep` 隔开 */
@@ -131,7 +132,30 @@ export const SHOW_EVENT = "tray-panel-show";
 export const HIDE_EVENT = "tray-panel-hide";
 export const CHANGED_EVENT = "tray-panel-changed";
 
+export interface TrayRoute {
+  id: number;
+  app: string;
+  model: string;
+  provider: string;
+  servedModel: string | null;
+  caller: {
+    kind: string | null;
+    agentId: string | null;
+    parentId: string | null;
+    name: string | null;
+  };
+  phase: "waiting" | "answering" | "done" | "failed" | "canceled";
+  time: number;
+  attempts: number;
+  status: number | null;
+  durationMs: number | null;
+  tokens: number | null;
+  outputTokens: number | null;
+  firstTokenMs: number | null;
+}
+
 export const trayPanelApi = {
+  routes: () => invoke<TrayRoute[]>("tray_panel_routes"),
   state: () => invoke<TrayPanelState>("tray_panel_state"),
   placement: () => invoke<PanelPlacement | null>("tray_panel_placement"),
   layout: (layout: PanelLayout) =>

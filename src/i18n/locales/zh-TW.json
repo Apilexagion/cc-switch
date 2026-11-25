@@ -6122,6 +6122,35 @@
     "confirmTitle": "刪除無法讀取的項目",
     "confirmMessage": "刪除「{{name}}」？只刪除 CC Switch 中的這筆記錄，不變更各應用自己的設定檔。"
   },
+  "trayRoutes": {
+    "title": "路由",
+    "child": "子代理",
+    "onlyChildren": "只看子代理",
+    "empty": "尚無路由請求",
+    "noChildren": "尚無子代理請求",
+    "more": "顯示更多",
+    "agentId": "子代理 ID",
+    "parentId": "父代理 ID",
+    "attempts": "嘗試 {{count}} 次",
+    "today": "今日 {{calls}} 次呼叫 · {{tokens}} token",
+    "elapsed": "{{seconds}} 秒",
+    "speed": "{{speed}} token/秒",
+    "phase": {
+      "waiting": "等待轉送",
+      "answering": "正在回答…",
+      "failed": "失敗",
+      "canceled": "已中斷"
+    },
+    "purpose": {
+      "guardian": "核准審查",
+      "guardian_review": "核准審查",
+      "review": "審查",
+      "compact": "壓縮",
+      "thread_title": "對話標題",
+      "memory_consolidation": "記憶整理",
+      "memgen": "記憶整理"
+    }
+  },
   "magpiePorts": {
     "carry": "複製到 {{target}} 繼續",
     "copied": "已另建目標工作階段，原工作階段未變更",

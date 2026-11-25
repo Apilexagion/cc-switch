@@ -1637,13 +1637,6 @@ mod tests {
                     .unwrap();
                 writer.write_all(b"# Doc\n").unwrap();
 
-                writer
-                    .add_symlink(
-                        "my-skill/alias.md",
-                        "SKILL.md",
-                        SimpleFileOptions::default().unix_permissions(0o120777),
-                    )
-                    .unwrap();
                 writer.finish().unwrap();
             }
 
@@ -1661,12 +1654,6 @@ mod tests {
                 .permissions()
                 .mode()
                 & 0o7777;
-            let symlink_entry_mode = fs::metadata(dst_ssot.join("my-skill/alias.md"))
-                .unwrap()
-                .permissions()
-                .mode()
-                & 0o7777;
-
             assert_eq!(
                 priv_mode,
                 0o755 & !umask,
@@ -1677,11 +1664,29 @@ mod tests {
                 0,
                 "entries without exec bit stay non-exec"
             );
+        }
+
+        #[test]
+        fn mixed_archive_with_symlink_preserves_live_skills() {
+            let temp = tempdir().unwrap();
+            let destination = temp.path().join("skills");
+            fs::create_dir(&destination).unwrap();
+            fs::write(destination.join("existing.txt"), b"original").unwrap();
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            writer
+                .start_file("incoming.md", SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(b"incoming").unwrap();
+            writer
+                .add_symlink("alias.md", "incoming.md", SimpleFileOptions::default())
+                .unwrap();
+            let archive = writer.finish().unwrap().into_inner();
+            assert!(restore_skills_zip_with_ssot(&archive, || Ok(destination.clone())).is_err());
             assert_eq!(
-                symlink_entry_mode,
-                0o644 & !umask,
-                "symlink entries extracted as regular files must not inherit 0777 exec bits"
+                fs::read(destination.join("existing.txt")).unwrap(),
+                b"original"
             );
+            assert!(!destination.join("incoming.md").exists());
         }
 
         #[test]

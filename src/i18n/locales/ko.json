@@ -6122,6 +6122,35 @@
     "confirmTitle": "읽을 수 없는 항목 삭제",
     "confirmMessage": "“{{name}}”을(를) 삭제할까요? CC Switch의 이 기록만 삭제되며 각 앱의 설정 파일은 변경되지 않습니다."
   },
+  "trayRoutes": {
+    "title": "라우팅",
+    "child": "하위 에이전트",
+    "onlyChildren": "하위 에이전트만",
+    "empty": "라우팅 요청 없음",
+    "noChildren": "하위 에이전트 요청 없음",
+    "more": "더 보기",
+    "agentId": "에이전트 ID",
+    "parentId": "상위 ID",
+    "attempts": "{{count}}회 시도",
+    "today": "오늘 {{calls}}회 · {{tokens}} 토큰",
+    "elapsed": "{{seconds}}초",
+    "speed": "{{speed}} 토큰/초",
+    "phase": {
+      "waiting": "대기 중",
+      "answering": "응답 중…",
+      "failed": "실패",
+      "canceled": "중단됨"
+    },
+    "purpose": {
+      "guardian": "승인 심사",
+      "guardian_review": "승인 심사",
+      "review": "검토",
+      "compact": "압축",
+      "thread_title": "대화 제목",
+      "memory_consolidation": "메모리 정리",
+      "memgen": "메모리 정리"
+    }
+  },
   "magpiePorts": {
     "carry": "{{target}}에서 복사본 이어가기",
     "copied": "Created a new session; the original is unchanged",

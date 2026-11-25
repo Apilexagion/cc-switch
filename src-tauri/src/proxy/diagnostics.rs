@@ -61,6 +61,7 @@ pub struct RequestDiagnostics {
 
 #[derive(Clone)]
 pub struct DiagnosticHandle {
+    pub(super) tray_ticket: Option<super::route_activity::Ticket>,
     store: RecentStore,
     id: String,
     started: Instant,
@@ -104,6 +105,7 @@ impl DiagnosticHandle {
 
     fn with_store(capture: bool, pii: PiiRedactionConfig, store: RecentStore) -> Self {
         let handle = Self {
+            tray_ticket: None,
             store,
             id: uuid::Uuid::new_v4().to_string(),
             started: Instant::now(),

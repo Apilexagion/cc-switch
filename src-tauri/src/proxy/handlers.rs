@@ -474,6 +474,7 @@ async fn handle_messages_for_app(
     )
     .await?;
 
+    ctx.track_route(&extensions, &headers, &body);
     let raw_endpoint = uri
         .path_and_query()
         .map(|path_and_query| path_and_query.as_str())
@@ -1479,6 +1480,7 @@ pub async fn handle_chat_completions(
         extensions.get::<crate::proxy::gateway_auth::AuthedKey>(),
     )
     .await?;
+    ctx.track_route(&extensions, &headers, &body);
     let endpoint = endpoint_with_query(&uri, "/chat/completions");
 
     let is_stream = body
@@ -1622,6 +1624,7 @@ async fn handle_responses_for_app(
         extensions.get::<crate::proxy::gateway_auth::AuthedKey>(),
     )
     .await?;
+    ctx.track_route(&extensions, &headers, &body);
     let endpoint = endpoint_with_query(&uri, responses_endpoint.path());
 
     let is_stream = body
@@ -1892,6 +1895,7 @@ async fn handle_codex_standalone_passthrough(
         extensions.get::<crate::proxy::gateway_auth::AuthedKey>(),
     )
     .await?;
+    ctx.track_route(&extensions, &headers, &body);
     let endpoint = endpoint_with_query(&uri, canonical_endpoint);
 
     let forwarder = ctx.create_forwarder(&state);
@@ -3282,6 +3286,9 @@ pub async fn handle_gemini(
         extensions.get::<crate::proxy::gateway_auth::AuthedKey>(),
     )
     .await?;
+    if uri.path().ends_with(":generateContent") || uri.path().ends_with(":streamGenerateContent") {
+        ctx.track_route(&extensions, &headers, &body);
+    }
 
     // 提取完整的路径和查询参数
     let endpoint = uri
@@ -4047,6 +4054,9 @@ async fn log_usage(
     let dedup_scope = super::usage::parser::dedup_scope_for_app(app_type, provider_id);
     let request_id = usage.dedup_request_id(dedup_scope);
     if let Some(diagnostics) = diagnostics {
+        if let Some(ticket) = diagnostics.tray_ticket {
+            ticket.usage(&usage, first_token_ms);
+        }
         diagnostics.bind(&request_id);
     }
 

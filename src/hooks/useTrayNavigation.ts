@@ -10,7 +10,7 @@ export interface TrayNavigation {
   app?: AppId;
   section?: SettingsSection;
   /** `needsRoute`：弹「需要路由」对话框；`add`：开始添加供应商 */
-  intent?: "needsRoute" | "add";
+  intent?: "needsRoute" | "add" | "usage";
   providerId?: string;
 }
 
@@ -25,6 +25,7 @@ export function parseTrayNavigation(
   raw: RawTrayNavigation | null | undefined,
 ): TrayNavigation | null {
   if (!raw) return null;
+  if (raw.intent === "usage") return { intent: "usage" };
   const section = SETTINGS_SECTIONS.find((s) => s === raw.section);
   if (section) return { section };
   const app = APP_IDS.find((id) => id === raw.app);

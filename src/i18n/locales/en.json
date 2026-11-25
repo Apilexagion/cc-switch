@@ -6122,6 +6122,35 @@
     "confirmTitle": "Delete unreadable entry",
     "confirmMessage": "Delete “{{name}}”? Only this CC Switch record is removed; the apps' own config files are not changed."
   },
+  "trayRoutes": {
+    "title": "Routing",
+    "child": "Subagent",
+    "onlyChildren": "Subagents only",
+    "empty": "No routed requests yet",
+    "noChildren": "No subagent requests recorded",
+    "more": "Show more",
+    "agentId": "Agent ID",
+    "parentId": "Parent ID",
+    "attempts": "{{count}} attempts",
+    "today": "Today {{calls}} calls · {{tokens}} token",
+    "elapsed": "{{seconds}} s",
+    "speed": "{{speed}} token/s",
+    "phase": {
+      "waiting": "Waiting",
+      "answering": "Answering…",
+      "failed": "Failed",
+      "canceled": "Canceled"
+    },
+    "purpose": {
+      "guardian": "Approval review",
+      "guardian_review": "Approval review",
+      "review": "Review",
+      "compact": "Compaction",
+      "thread_title": "Thread title",
+      "memory_consolidation": "Memory",
+      "memgen": "Memory"
+    }
+  },
   "magpiePorts": {
     "carry": "Continue a copy in {{target}}",
     "copied": "Created a new session; the original is unchanged",

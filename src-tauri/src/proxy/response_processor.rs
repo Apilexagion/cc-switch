@@ -767,6 +767,9 @@ async fn log_usage_internal(
     let dedup_scope = super::usage::parser::dedup_scope_for_app(app_type, provider_id);
     let request_id = usage.dedup_request_id(dedup_scope);
     if let Some(diagnostics) = diagnostics {
+        if let Some(ticket) = diagnostics.tray_ticket {
+            ticket.usage(&usage, first_token_ms);
+        }
         diagnostics.bind(&request_id);
     }
 

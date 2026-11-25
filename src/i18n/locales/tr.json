@@ -6122,6 +6122,35 @@
     "confirmTitle": "Okunamayan kaydı sil",
     "confirmMessage": "“{{name}}” silinsin mi? Yalnızca bu CC Switch kaydı silinir; uygulamaların kendi yapılandırma dosyaları değişmez."
   },
+  "trayRoutes": {
+    "title": "Yönlendirme",
+    "child": "Alt ajan",
+    "onlyChildren": "Yalnızca alt ajanlar",
+    "empty": "Henüz istek yok",
+    "noChildren": "Alt ajan isteği yok",
+    "more": "Daha fazla göster",
+    "agentId": "Ajan kimliği",
+    "parentId": "Üst ajan kimliği",
+    "attempts": "{{count}} deneme",
+    "today": "Bugün {{calls}} çağrı · {{tokens}} token",
+    "elapsed": "{{seconds}} sn",
+    "speed": "{{speed}} token/sn",
+    "phase": {
+      "waiting": "Bekliyor",
+      "answering": "Yanıtlıyor…",
+      "failed": "Başarısız",
+      "canceled": "İptal edildi"
+    },
+    "purpose": {
+      "guardian": "Onay incelemesi",
+      "guardian_review": "Onay incelemesi",
+      "review": "İnceleme",
+      "compact": "Sıkıştırma",
+      "thread_title": "Oturum başlığı",
+      "memory_consolidation": "Bellek düzenleme",
+      "memgen": "Bellek düzenleme"
+    }
+  },
   "magpiePorts": {
     "carry": "Kopyaya {{target}} ile devam et",
     "copied": "Created a new session; the original is unchanged",

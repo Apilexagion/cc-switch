@@ -553,6 +553,7 @@ impl ProxyServer {
             .route("/gemini/v1/*path", any(handlers::handle_gemini))
             // 提高默认请求体大小限制（避免 413 Payload Too Large）
             .layer(DefaultBodyLimit::max(handlers::MAX_REQUEST_BODY_BYTES))
+            .layer(middleware::from_fn(super::route_activity::observe))
             // Fork：局域网网关守卫（覆盖所有路由，在转发/凭证替换之前执行）。
             // 环回零成本直通；非环回按「共享开关 + enabled key」决定 403/401/放行。
             .layer(axum::middleware::from_fn_with_state(

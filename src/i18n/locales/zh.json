@@ -6122,6 +6122,35 @@
     "confirmTitle": "删除无法读取的条目",
     "confirmMessage": "删除「{{name}}」？只删除 CC Switch 里的这条记录，不改动各应用自己的配置文件。"
   },
+  "trayRoutes": {
+    "title": "路由",
+    "child": "子代理",
+    "onlyChildren": "仅子代理",
+    "empty": "暂无路由请求",
+    "noChildren": "暂无子代理请求",
+    "more": "显示更多",
+    "agentId": "子代理 ID",
+    "parentId": "父代理 ID",
+    "attempts": "尝试 {{count}} 次",
+    "today": "今日 {{calls}} 次调用 · {{tokens}} token",
+    "elapsed": "{{seconds}} 秒",
+    "speed": "{{speed}} token/秒",
+    "phase": {
+      "waiting": "等待转发",
+      "answering": "正在回答…",
+      "failed": "失败",
+      "canceled": "已中断"
+    },
+    "purpose": {
+      "guardian": "审批审查",
+      "guardian_review": "审批审查",
+      "review": "审查",
+      "compact": "压缩",
+      "thread_title": "会话标题",
+      "memory_consolidation": "记忆整理",
+      "memgen": "记忆整理"
+    }
+  },
   "magpiePorts": {
     "carry": "复制到 {{target}} 继续",
     "copied": "已另建目标会话，原会话未改动",

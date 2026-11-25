@@ -6122,6 +6122,35 @@
     "confirmTitle": "Unlesbaren Eintrag löschen",
     "confirmMessage": "„{{name}}“ löschen? Nur dieser CC-Switch-Eintrag wird entfernt; die Konfigurationsdateien der Apps bleiben unverändert."
   },
+  "trayRoutes": {
+    "title": "Routing",
+    "child": "Unteragent",
+    "onlyChildren": "Nur Unteragenten",
+    "empty": "Noch keine Anfragen",
+    "noChildren": "Keine Unteragent-Anfragen",
+    "more": "Mehr anzeigen",
+    "agentId": "Agenten-ID",
+    "parentId": "Übergeordnete ID",
+    "attempts": "Versuche: {{count}}",
+    "today": "Heute {{calls}} Aufrufe · {{tokens}} Token",
+    "elapsed": "{{seconds}} s",
+    "speed": "{{speed}} Token/s",
+    "phase": {
+      "waiting": "Wartet",
+      "answering": "Antwortet…",
+      "failed": "Fehlgeschlagen",
+      "canceled": "Abgebrochen"
+    },
+    "purpose": {
+      "guardian": "Freigabeprüfung",
+      "guardian_review": "Freigabeprüfung",
+      "review": "Prüfung",
+      "compact": "Komprimierung",
+      "thread_title": "Sitzungstitel",
+      "memory_consolidation": "Speicherpflege",
+      "memgen": "Speicherpflege"
+    }
+  },
   "magpiePorts": {
     "carry": "Kopie in {{target}} fortsetzen",
     "copied": "Created a new session; the original is unchanged",

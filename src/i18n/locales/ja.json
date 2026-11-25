@@ -6122,6 +6122,35 @@
     "confirmTitle": "読み取れない項目を削除",
     "confirmMessage": "「{{name}}」を削除しますか？CC Switch のこの記録だけを削除し、各アプリの設定ファイルは変更しません。"
   },
+  "trayRoutes": {
+    "title": "ルート",
+    "child": "サブエージェント",
+    "onlyChildren": "サブエージェントのみ",
+    "empty": "ルート要求はまだありません",
+    "noChildren": "サブエージェントの要求はありません",
+    "more": "さらに表示",
+    "agentId": "エージェント ID",
+    "parentId": "親 ID",
+    "attempts": "試行 {{count}} 回",
+    "today": "今日 {{calls}} 回 · {{tokens}} token",
+    "elapsed": "{{seconds}} 秒",
+    "speed": "{{speed}} token/秒",
+    "phase": {
+      "waiting": "待機中",
+      "answering": "応答中…",
+      "failed": "失敗",
+      "canceled": "中断"
+    },
+    "purpose": {
+      "guardian": "承認審査",
+      "guardian_review": "承認審査",
+      "review": "レビュー",
+      "compact": "圧縮",
+      "thread_title": "会話タイトル",
+      "memory_consolidation": "メモリ整理",
+      "memgen": "メモリ整理"
+    }
+  },
   "magpiePorts": {
     "carry": "{{target}} にコピーして続ける",
     "copied": "Created a new session; the original is unchanged",

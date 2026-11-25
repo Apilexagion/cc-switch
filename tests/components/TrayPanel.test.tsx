@@ -58,6 +58,7 @@ const texts: PanelTexts = {
   openPanel: "Open panel",
   configTab: "Configuration",
   usageTab: "Usage",
+  routeTab: "Routing",
   resetsIn: "Resets in {when}",
   durationDays: "{n}d",
   durationHours: "{n}h",

@@ -2810,9 +2810,8 @@ pub fn create_tray_menu(
 
     let mut handles = HashMap::new();
     let mut builder = MenuBuilder::new(app);
-    // Linux 点图标只能出原生菜单，最上面放一项打开托盘面板。
-    #[cfg(target_os = "linux")]
-    {
+    // Keep the route feed accessible when the user chooses the native menu.
+    if crate::tray_panel::uses_native_menu() {
         let texts = crate::tray_panel::PanelTexts::current();
         let item = MenuItem::with_id(
             app,
@@ -3172,7 +3171,7 @@ pub struct TrayNavigation {
 
 impl TrayNavigation {
     fn is_empty(&self) -> bool {
-        self.app.is_none() && self.section.is_none()
+        self.app.is_none() && self.section.is_none() && self.intent.is_none()
     }
 }
 
@@ -3194,6 +3193,10 @@ fn parse_nav_id(id: &str) -> Option<TrayNavigation> {
             .map(|app| app.as_str().to_string())
     };
     Some(match kind {
+        "usage" if target.is_none() => TrayNavigation {
+            intent: Some("usage".into()),
+            ..Default::default()
+        },
         "main" => TrayNavigation::default(),
         "settings" => TrayNavigation {
             section: Some(target?.to_string()),

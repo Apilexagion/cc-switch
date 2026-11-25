@@ -648,6 +648,27 @@ impl RequestContext {
         .copilot_auto_sessions(state.copilot_auto_sessions.clone())
     }
 
+    /// Attach the tray row only after route admission. The slot also follows
+    /// the final response body, including locally translated streaming bodies.
+    pub(super) fn track_route(
+        &mut self,
+        extensions: &http::Extensions,
+        headers: &HeaderMap,
+        body: &serde_json::Value,
+    ) {
+        let ticket = super::route_activity::begin(
+            extensions,
+            self.app_type_str,
+            &self.request_model,
+            &self.provider.name,
+            headers,
+            body,
+        );
+        if let Some(handle) = self.diagnostics.as_mut() {
+            handle.tray_ticket = ticket;
+        }
+    }
+
     /// 获取 Provider 列表（用于故障转移）
     ///
     /// 返回在创建上下文时已选择的 providers，避免重复调用 select_providers()

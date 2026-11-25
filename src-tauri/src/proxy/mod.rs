@@ -41,6 +41,7 @@ pub mod request_middleware;
 pub mod request_rewrite;
 pub mod response_middleware;
 pub mod response_processor;
+pub(crate) mod route_activity;
 pub(crate) mod server;
 pub mod session;
 pub(crate) mod sse;

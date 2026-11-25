@@ -24,7 +24,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindow, WebviewWindo
 use crate::store::AppState;
 
 pub const PANEL_LABEL: &str = "tray-panel";
-/// Linux 原生菜单里「打开快捷面板」的事件 id。
+/// 原生菜单里「打开快捷面板」的事件 id。
 pub const OPEN_PANEL_ID: &str = "panel:open";
 /// 点托盘图标出原生菜单还是面板。Linux 只能出原生菜单；其它平台默认出面板，
 /// 设置里打开「原生托盘菜单」（`native_tray_menu`）就挂回原生菜单，不再出面板。
@@ -90,6 +90,7 @@ pub struct PanelTexts {
     pub open_panel: &'static str,
     pub config_tab: &'static str,
     pub usage_tab: &'static str,
+    pub route_tab: &'static str,
     /// 某一档还有多久重置：`{when}` 是下面几个单位拼出的时长
     pub resets_in: &'static str,
     /// 时长单位：`{n}` 是数字；最多取两级（天+小时、小时+分），中间用 `duration_sep` 隔开
@@ -116,6 +117,7 @@ impl PanelTexts {
                 open_panel: "Open quick panel",
                 config_tab: "Configuration",
                 usage_tab: "Usage",
+                route_tab: "Routing",
                 resets_in: "Resets in {when}",
                 duration_days: "{n}d",
                 duration_hours: "{n}h",
@@ -135,6 +137,7 @@ impl PanelTexts {
                 open_panel: "Hızlı paneli aç",
                 config_tab: "Yapılandırma",
                 usage_tab: "Kullanım",
+                route_tab: "Yönlendirme",
                 resets_in: "{when} içinde sıfırlanır",
                 duration_days: "{n} g",
                 duration_hours: "{n} sa",
@@ -154,6 +157,7 @@ impl PanelTexts {
                 open_panel: "Schnellpanel öffnen",
                 config_tab: "Konfiguration",
                 usage_tab: "Nutzung",
+                route_tab: "Routing",
                 resets_in: "Zurückgesetzt in {when}",
                 duration_days: "{n} T.",
                 duration_hours: "{n} Std.",
@@ -173,6 +177,7 @@ impl PanelTexts {
                 open_panel: "Открыть быструю панель",
                 config_tab: "Конфигурация",
                 usage_tab: "Использование",
+                route_tab: "Маршруты",
                 resets_in: "Сброс через {when}",
                 duration_days: "{n} д",
                 duration_hours: "{n} ч",
@@ -192,6 +197,7 @@ impl PanelTexts {
                 open_panel: "빠른 패널 열기",
                 config_tab: "설정",
                 usage_tab: "사용량",
+                route_tab: "라우팅",
                 resets_in: "{when} 후 초기화",
                 duration_days: "{n}일",
                 duration_hours: "{n}시간",
@@ -211,6 +217,7 @@ impl PanelTexts {
                 open_panel: "クイックパネルを開く",
                 config_tab: "構成",
                 usage_tab: "使用量",
+                route_tab: "ルート",
                 resets_in: "{when}後にリセット",
                 duration_days: "{n}日",
                 duration_hours: "{n}時間",
@@ -230,6 +237,7 @@ impl PanelTexts {
                 open_panel: "開啟快捷面板",
                 config_tab: "配置",
                 usage_tab: "用量",
+                route_tab: "路由",
                 resets_in: "{when}後重置",
                 duration_days: "{n}天",
                 duration_hours: "{n}小時",
@@ -249,6 +257,7 @@ impl PanelTexts {
                 open_panel: "打开快捷面板",
                 config_tab: "配置",
                 usage_tab: "用量",
+                route_tab: "路由",
                 resets_in: "{when}后重置",
                 duration_days: "{n}天",
                 duration_hours: "{n}小时",
@@ -592,7 +601,7 @@ pub fn toggle(app: &AppHandle, rect: &tauri::Rect) {
     show_at(app, &window, (pos.x, pos.y, size.width, size.height));
 }
 
-/// Linux 原生菜单里的「打开快捷面板」：没有图标位置，弹在鼠标旁边
+/// 原生菜单里的「打开快捷面板」：没有图标位置，弹在鼠标旁边
 /// （Wayland 下窗口位置由合成器决定）。
 pub fn show_at_cursor(app: &AppHandle) {
     let Some(window) = ensure_window(app) else {
@@ -1190,6 +1199,11 @@ pub async fn tray_panel_state(app: AppHandle) -> Result<crate::tray::PanelModel,
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub(crate) fn tray_panel_routes() -> Vec<crate::proxy::route_activity::RouteRow> {
+    crate::proxy::route_activity::snapshot()
 }
 
 /// 面板挂载时取一次：第一次弹出时窗口是新建的，`tray-panel-show` 可能早于前端开始监听。

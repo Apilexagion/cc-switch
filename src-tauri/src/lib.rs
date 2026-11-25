@@ -1941,6 +1941,7 @@ pub fn run() {
             commands::take_startup_attach_failures,
             tray::take_tray_navigation,
             tray_panel::tray_panel_state,
+            tray_panel::tray_panel_routes,
             tray_panel::tray_panel_placement,
             tray_panel::tray_panel_layout,
             tray_panel::tray_panel_hide,

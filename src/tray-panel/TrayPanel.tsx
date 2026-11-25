@@ -47,9 +47,11 @@ import { usePanelTheme } from "./usePanelTheme";
 
 const LANGUAGE_KEY = "language";
 
-const LazyUsageTab = lazy(async () => {
-  const [{ i18nReady, syncLanguageFromSettings }, { UsageTab }] =
-    await Promise.all([import("@/i18n"), import("./UsageTab")]);
+async function loadPanelTab<T>(loading: Promise<T>): Promise<T> {
+  const [{ i18nReady, syncLanguageFromSettings }, module] = await Promise.all([
+    import("@/i18n"),
+    loading,
+  ]);
   await i18nReady;
   try {
     const stored = window.localStorage.getItem(LANGUAGE_KEY);
@@ -59,10 +61,17 @@ const LazyUsageTab = lazy(async () => {
   } catch {
     // 读不到沿用当前语言
   }
-  return { default: UsageTab };
-});
+  return module;
+}
 
-type Tab = "config" | "usage";
+const LazyUsageTab = lazy(async () => ({
+  default: (await loadPanelTab(import("./UsageTab"))).UsageTab,
+}));
+const LazyRouteTab = lazy(async () => ({
+  default: (await loadPanelTab(import("./RouteTab"))).RouteTab,
+}));
+
+type Tab = "config" | "usage" | "routes";
 const TAB_KEY = "cc-switch-tray-tab";
 const MAIN_MAX_HEIGHT = 620;
 /** 使用固定画布时，窗口在一次弹出里的最大高度 */
@@ -88,9 +97,8 @@ const FOCUS_RING =
 
 function readTab(): Tab {
   try {
-    return window.localStorage.getItem(TAB_KEY) === "usage"
-      ? "usage"
-      : "config";
+    const tab = window.localStorage.getItem(TAB_KEY);
+    return tab === "usage" || tab === "routes" ? tab : "config";
   } catch {
     return "config";
   }
@@ -623,7 +631,7 @@ export function TrayPanel() {
       shownSeq.current = next.seq;
       const request = ++showRequest.current;
       setPanelVisible(true);
-      if (readTab() === "usage") {
+      if (readTab() !== "config") {
         try {
           const stored = window.localStorage.getItem(LANGUAGE_KEY);
           if (stored) {
@@ -1081,7 +1089,7 @@ export function TrayPanel() {
             role="tablist"
             className="flex rounded-lg bg-black/[0.06] p-0.5 dark:bg-white/[0.08]"
           >
-            {(["config", "usage"] as const).map((value) => (
+            {(["config", "usage", "routes"] as const).map((value) => (
               <button
                 key={value}
                 type="button"
@@ -1096,7 +1104,13 @@ export function TrayPanel() {
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                {value === "config" ? texts.configTab : texts.usageTab}
+                {
+                  {
+                    config: texts.configTab,
+                    usage: texts.usageTab,
+                    routes: texts.routeTab,
+                  }[value]
+                }
               </button>
             ))}
           </div>
@@ -1173,10 +1187,18 @@ export function TrayPanel() {
                 </div>
               }
             >
-              <LazyUsageTab
-                refreshKey={shownCount}
-                visible={panelVisible && tab === "usage"}
-              />
+              {tab === "routes" ? (
+                <LazyRouteTab
+                  visible={panelVisible}
+                  refreshKey={shownCount}
+                  onOpenUsage={() => action("nav:usage")}
+                />
+              ) : (
+                <LazyUsageTab
+                  refreshKey={shownCount}
+                  visible={panelVisible && tab === "usage"}
+                />
+              )}
             </Suspense>
           )}
         </div>

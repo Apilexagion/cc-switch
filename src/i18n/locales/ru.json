@@ -6120,6 +6120,35 @@
     "confirmTitle": "Удалить нечитаемую запись",
     "confirmMessage": "Удалить «{{name}}»? Будет удалена только эта запись CC Switch; собственные файлы конфигурации приложений не изменятся."
   },
+  "trayRoutes": {
+    "title": "Маршруты",
+    "child": "Подагент",
+    "onlyChildren": "Только подагенты",
+    "empty": "Пока нет запросов",
+    "noChildren": "Нет запросов подагентов",
+    "more": "Показать ещё",
+    "agentId": "ID агента",
+    "parentId": "ID родителя",
+    "attempts": "Попыток: {{count}}",
+    "today": "Сегодня {{calls}} вызовов · {{tokens}} токенов",
+    "elapsed": "{{seconds}} с",
+    "speed": "{{speed}} токенов/с",
+    "phase": {
+      "waiting": "Ожидание",
+      "answering": "Отвечает…",
+      "failed": "Ошибка",
+      "canceled": "Прервано"
+    },
+    "purpose": {
+      "guardian": "Проверка разрешения",
+      "guardian_review": "Проверка разрешения",
+      "review": "Проверка",
+      "compact": "Сжатие",
+      "thread_title": "Название чата",
+      "memory_consolidation": "Обработка памяти",
+      "memgen": "Обработка памяти"
+    }
+  },
   "magpiePorts": {
     "carry": "Продолжить копию в {{target}}",
     "copied": "Created a new session; the original is unchanged",

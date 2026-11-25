@@ -1019,6 +1019,10 @@ function App() {
 
   useTrayNavigation((navigation) => {
     const navigate = () => {
+      if (navigation.intent === "usage") {
+        openPageFromNav("usage");
+        return;
+      }
       if (navigation.section) {
         openSettings(navigation.section);
         return;

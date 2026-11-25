@@ -2029,6 +2029,9 @@ impl RequestForwarder {
                     .unwrap_or_default(),
             )
         });
+        if let Some(ticket) = super::route_activity::ticket(attempt.extensions) {
+            ticket.attempt(&attempt.provider.name);
+        }
         let result = self
             .forward_observed(
                 attempt,
@@ -3378,6 +3381,9 @@ impl RequestForwarder {
                 }
             }
             attempt.prepared(&filtered_body, &secrets);
+        }
+        if let Some(ticket) = super::route_activity::ticket(extensions) {
+            ticket.sending(outbound_model.as_deref());
         }
 
         let response = self
