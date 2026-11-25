@@ -101,33 +101,52 @@ pub async fn save_settings(
         merged.codex_proxy_without_official_login != existing.codex_proxy_without_official_login;
     let preserve_login_changed = merged.preserve_codex_official_auth_on_switch
         != existing.preserve_codex_official_auth_on_switch;
-    // Ordinarily publish settings only after all target writes, so a settings
-    // failure rolls files back too. A combined directory/source change retains
-    // the existing directory-first ordering to resolve the new native paths.
-    // Unrelated settings must remain editable if a configured source disappears.
-    if shared_instruction_file_changed && instruction_dirs_changed {
-        let source = merged.shared_instruction_file.clone();
-        crate::settings::update_general_settings(merged)?;
-        if let Err(error) = crate::shared_instructions::sync_with_source_for_state(
-            state.inner(),
-            source.as_deref(),
-            || Ok(()),
-        ) {
-            crate::settings::update_general_settings(existing.clone()).map_err(|rollback| {
-                format!("共享指令同步失败 ({error}); 设置回滚也失败: {rollback}")
-            })?;
-            return Err(error.to_string());
-        }
-    } else if shared_instruction_file_changed {
-        let source = merged.shared_instruction_file.clone();
-        crate::shared_instructions::sync_with_source_for_state(
-            state.inner(),
-            source.as_deref(),
-            || crate::settings::update_general_settings(merged),
-        )?;
-    } else {
-        crate::settings::update_general_settings(merged)?;
-    }
+    let previous_settings = existing.clone();
+    let settings_state = state.inner().clone();
+    let next_copilot_vscode = merged.copilot_vscode.clone();
+    let previous_copilot_vscode = existing.copilot_vscode.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::copilot_config::save_vscode_settings(
+            &previous_copilot_vscode,
+            &next_copilot_vscode,
+            || {
+                // Ordinarily publish settings only after all target writes, so a settings
+                // failure rolls files back too. A combined directory/source change retains
+                // the existing directory-first ordering to resolve the new native paths.
+                // Unrelated settings must remain editable if a configured source disappears.
+                if shared_instruction_file_changed && instruction_dirs_changed {
+                    let source = merged.shared_instruction_file.clone();
+                    crate::settings::update_general_settings(merged)?;
+                    if let Err(error) = crate::shared_instructions::sync_with_source_for_state(
+                        &settings_state,
+                        source.as_deref(),
+                        || Ok(()),
+                    ) {
+                        crate::settings::update_general_settings(previous_settings).map_err(
+                            |rollback| {
+                                AppError::Message(format!(
+                                    "共享指令同步失败 ({error}); 设置回滚也失败: {rollback}"
+                                ))
+                            },
+                        )?;
+                        return Err(error);
+                    }
+                } else if shared_instruction_file_changed {
+                    let source = merged.shared_instruction_file.clone();
+                    crate::shared_instructions::sync_with_source_for_state(
+                        &settings_state,
+                        source.as_deref(),
+                        || crate::settings::update_general_settings(merged),
+                    )?;
+                } else {
+                    crate::settings::update_general_settings(merged)?;
+                }
+                Ok(())
+            },
+        )
+    })
+    .await
+    .map_err(|error| format!("Settings save task failed: {error}"))??;
 
     // 原生托盘菜单 / 托盘面板当场切换，不用重启。
     if tray_style_changed {

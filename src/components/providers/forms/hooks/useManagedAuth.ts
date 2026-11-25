@@ -8,7 +8,10 @@ import type { CodexLoginMethod, ManagedLoginMethod } from "@/lib/api/auth";
 import { deliverLoginLink, readAuthOpenBrowser } from "@/lib/authLoginLink";
 import { copyText } from "@/lib/clipboard";
 import { resetAgyCurrentQuota } from "@/lib/query/agyCurrentQuota";
-import { subscriptionKeys } from "@/lib/query/subscription";
+import {
+  invalidateAgyLoginCaches,
+  subscriptionKeys,
+} from "@/lib/query/subscription";
 import type {
   ManagedAuthAccount,
   ManagedAuthProvider,
@@ -385,23 +388,21 @@ export function useManagedAuth(
             }),
           );
         }
+        return;
       }
       await refetchStatus();
       await queryClient.invalidateQueries({ queryKey });
-      // 没绑账号的 Antigravity 官方卡查的是「agy 现在登着的号」，切完重查，别留着上个号的额度
-      if (authProvider === "agy_oauth") {
-        await queryClient.invalidateQueries({
-          queryKey: subscriptionKeys.quota("agy"),
-        });
-      }
     },
     onError: async (e) => {
       console.error("[ManagedAuth] Failed to set default account:", e);
       setError(e instanceof Error ? e.message : String(e));
-      // AGY may have written the global login before post-write verification failed.
       if (authProvider === "agy_oauth") {
-        await resetAgyCurrentQuota(queryClient);
-        await queryClient.invalidateQueries({ queryKey });
+        toast.error(e instanceof Error ? e.message : String(e));
+      }
+    },
+    onSettled: async () => {
+      if (authProvider === "agy_oauth") {
+        await invalidateAgyLoginCaches(queryClient);
       }
     },
   });

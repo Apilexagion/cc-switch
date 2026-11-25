@@ -16,6 +16,10 @@ import { Input } from "@/components/ui/input";
 import { Notice } from "@/components/ui/notice";
 import { authApi, providersApi, settingsApi } from "@/lib/api";
 import {
+  agyAuthStatusQuery,
+  invalidateAgyLoginCaches,
+} from "@/lib/query/subscription";
+import {
   canSwitchAgyAccount,
   resolveManagedAccountId,
 } from "@/lib/authBinding";
@@ -25,7 +29,6 @@ import type { Provider } from "@/types";
 import { toast } from "@/lib/toast";
 import { extractErrorMessage } from "@/utils/errorUtils";
 import { cn } from "@/lib/utils";
-import { resetAgyCurrentQuota } from "@/lib/query/agyCurrentQuota";
 import { providerNeedsRouting } from "@/utils/providerCapabilities";
 import { isCopilotOfficialCard } from "@/config/copilotConfig";
 
@@ -248,8 +251,7 @@ export function OpenTerminalDialog({
       ? resolveManagedAccountId(provider.meta, "agy_oauth")
       : null;
   const { data: agyStatus, isFetching: agyStatusLoading } = useQuery({
-    queryKey: ["managed-auth-status", "agy_oauth"],
-    queryFn: () => authApi.authGetStatus("agy_oauth"),
+    ...agyAuthStatusQuery,
     enabled: boundAgyAccount !== null,
   });
   const canUseCurrentAgyLogin = boundAgyAccount !== null && isLinux();
@@ -325,12 +327,8 @@ export function OpenTerminalDialog({
       );
       setOpening(false);
     } finally {
-      // Switching may have succeeded even if opening the terminal failed afterward.
-      if (boundAgyAccount !== null) {
-        await resetAgyCurrentQuota(queryClient);
-        void queryClient.invalidateQueries({
-          queryKey: ["managed-auth-status", "agy_oauth"],
-        });
+      if (boundAgyAccount && !useCurrentAgyLogin) {
+        void invalidateAgyLoginCaches(queryClient);
       }
     }
   };

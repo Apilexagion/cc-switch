@@ -5,6 +5,7 @@
 use crate::app_config::AppType;
 use crate::error::AppError;
 use crate::proxy::types::*;
+use rusqlite::OptionalExtension;
 
 use super::super::{lock_conn, lock_recovering, Database};
 
@@ -273,6 +274,13 @@ impl Database {
         let preserve =
             config.app_type == "codex" && crate::settings::preserve_codex_official_auth_on_switch();
         let conn = lock_conn!(self.conn);
+        let previous_failover = conn
+            .query_row(
+                "SELECT auto_failover_enabled != 0 FROM proxy_config WHERE app_type = ?1",
+                [&config.app_type],
+                |row| row.get::<_, bool>(0),
+            )
+            .optional()?;
 
         conn.execute(
             "UPDATE proxy_config SET
@@ -307,6 +315,12 @@ impl Database {
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
+        if let (true, Ok(app)) = (
+            previous_failover.is_some_and(|previous| previous != config.auto_failover_enabled),
+            config.app_type.parse(),
+        ) {
+            self.advance_route_revision(&app);
+        }
 
         Ok(())
     }

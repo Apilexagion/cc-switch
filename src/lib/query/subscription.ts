@@ -1,5 +1,6 @@
 import { useRef } from "react";
 import {
+  queryOptions,
   useQuery,
   useQueryClient,
   type QueryClient,
@@ -20,7 +21,11 @@ import { PROVIDER_TYPES } from "@/config/constants";
 import { appHas } from "@/config/appSpecs";
 import { resolveDisplayUsage, type LastGoodSnapshot } from "./queries";
 import { extractErrorMessage } from "@/utils/errorUtils";
-import { AGY_CURRENT_SCOPE_KEY, agyCurrentQuotaKey } from "./agyCurrentQuota";
+import {
+  AGY_CURRENT_SCOPE_KEY,
+  agyCurrentQuotaKey,
+  resetAgyCurrentQuota,
+} from "./agyCurrentQuota";
 
 const REFETCH_INTERVAL = 5 * 60 * 1000; // 5 minutes
 
@@ -30,6 +35,21 @@ export const subscriptionKeys = {
   agyCurrentScope: AGY_CURRENT_SCOPE_KEY,
   agyCurrentQuota: agyCurrentQuotaKey,
 };
+
+export const agyAuthStatusQuery = queryOptions({
+  queryKey: ["managed-auth-status", "agy_oauth"],
+  queryFn: () => authApi.authGetStatus("agy_oauth"),
+  staleTime: 30_000,
+});
+
+/** Refresh the actual agy login and the quota shown on cards that follow it. */
+export async function invalidateAgyLoginCaches(queryClient: QueryClient) {
+  await Promise.all([
+    queryClient.invalidateQueries({ queryKey: agyAuthStatusQuery.queryKey }),
+    resetAgyCurrentQuota(queryClient),
+    queryClient.invalidateQueries({ queryKey: subscriptionKeys.quota("agy") }),
+  ]);
+}
 
 /**
  * Grok 的 CLI 登录（~/.grok/auth.json）可能被后端改写之后要重读的缓存：

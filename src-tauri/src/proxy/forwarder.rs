@@ -215,6 +215,7 @@ pub struct RequestForwarder {
     app_handle: Option<tauri::AppHandle>,
     /// 请求开始时的"当前供应商 ID"（用于判断是否需要同步 UI/托盘）
     current_provider_id_at_start: String,
+    route_revision: Option<u64>,
     /// 代理会话 ID（用于 Gemini Native shadow replay）
     session_id: String,
     /// Session ID 是否由客户端提供；生成值不能作为上游缓存身份。
@@ -262,6 +263,9 @@ pub struct RequestForwarder {
     last_outbound_model: std::sync::Mutex<Option<String>>,
     /// 隐私过滤配置。在 [`Self::forward`] 里对定稿的上游请求体执行，每次尝试都会执行。
     privacy_filter: PrivacyFilterConfig,
+    #[cfg(test)]
+    test_copilot_auth: Option<Arc<RwLock<CopilotAuthManager>>>,
+    pub(crate) copilot_auto_sessions: Arc<super::copilot_auto_session::AutoSessionManager>,
 }
 
 impl RequestForwarder {
@@ -533,6 +537,7 @@ impl RequestForwarder {
             failover_manager,
             app_handle,
             current_provider_id_at_start,
+            route_revision: None,
             session_id,
             session_client_provided,
             rectifier_config,
@@ -554,6 +559,32 @@ impl RequestForwarder {
             failover_chain: false,
             last_outbound_model: std::sync::Mutex::new(None),
             privacy_filter: PrivacyFilterConfig::default(),
+            #[cfg(test)]
+            test_copilot_auth: None,
+            copilot_auto_sessions: Arc::new(
+                super::copilot_auto_session::AutoSessionManager::default(),
+            ),
+        }
+    }
+
+    pub fn copilot_auto_sessions(
+        mut self,
+        sessions: Arc<super::copilot_auto_session::AutoSessionManager>,
+    ) -> Self {
+        self.copilot_auto_sessions = sessions;
+        self
+    }
+
+    fn copilot_auto_timeout_budget(&self, streaming: bool) -> std::time::Duration {
+        let configured = if streaming && !self.streaming_first_byte_timeout.is_zero() {
+            self.streaming_first_byte_timeout
+        } else {
+            self.non_streaming_timeout
+        };
+        if configured.is_zero() {
+            std::time::Duration::from_secs(600)
+        } else {
+            configured
         }
     }
 
@@ -680,6 +711,11 @@ impl RequestForwarder {
     /// 这个请求走故障转移队列（故障转移开着）。
     pub fn failover_chain(mut self, failover_chain: bool) -> Self {
         self.failover_chain = failover_chain;
+        self
+    }
+
+    pub(crate) fn route_revision(mut self, route_revision: u64) -> Self {
+        self.route_revision = Some(route_revision);
         self
     }
 
@@ -835,10 +871,15 @@ impl RequestForwarder {
 
         {
             let mut current_providers = self.current_providers.write().await;
-            current_providers.insert(
-                app_type.to_string(),
-                (provider.id.clone(), provider.name.clone()),
-            );
+            if self
+                .route_revision
+                .is_none_or(|revision| revision == self.router.route_revision(app_type))
+            {
+                current_providers.insert(
+                    app_type.to_string(),
+                    (provider.id.clone(), provider.name.clone()),
+                );
+            }
         }
 
         {
@@ -848,14 +889,18 @@ impl RequestForwarder {
             if self.current_provider_id_at_start.as_str() != provider.id.as_str() {
                 status.failover_count += 1;
 
-                let fm = self.failover_manager.clone();
-                let ah = self.app_handle.clone();
-                let pid = provider.id.clone();
-                let pname = provider.name.clone();
-                let at = app_type.to_string();
-                tokio::spawn(async move {
-                    let _ = fm.try_switch(ah.as_ref(), &at, &pid, &pname).await;
-                });
+                if let Some(revision) = self.route_revision.filter(|_| self.failover_chain) {
+                    let fm = self.failover_manager.clone();
+                    let ah = self.app_handle.clone();
+                    let pid = provider.id.clone();
+                    let pname = provider.name.clone();
+                    let at = app_type.to_string();
+                    tokio::spawn(async move {
+                        let _ = fm
+                            .try_switch(ah.as_ref(), &at, &pid, &pname, revision)
+                            .await;
+                    });
+                }
             }
             refresh_success_rate(&mut status);
         }
@@ -1331,6 +1376,7 @@ impl RequestForwarder {
                     .forward(
                         &attempt,
                         provider_body,
+                        Some(&body),
                         &mut attempted_codex_upstream_format,
                     )
                     .await;
@@ -1423,6 +1469,7 @@ impl RequestForwarder {
                                 .forward(
                                     &attempt,
                                     media_body,
+                                    None,
                                     &mut media_retry_codex_upstream_format,
                                 )
                                 .await
@@ -1489,7 +1536,7 @@ impl RequestForwarder {
                         );
                         let mut retry_codex_upstream_format = None;
                         match self
-                            .forward(&attempt, retry_body, &mut retry_codex_upstream_format)
+                            .forward(&attempt, retry_body, None, &mut retry_codex_upstream_format)
                             .await
                         {
                             Ok(forwarded) => {
@@ -1575,6 +1622,7 @@ impl RequestForwarder {
                                     &attempt,
                                     // Retain this rare retry body for rejection classification.
                                     opaque_body.clone(),
+                                    None,
                                     &mut opaque_retry_codex_upstream_format,
                                 )
                                 .await
@@ -1670,6 +1718,7 @@ impl RequestForwarder {
                                     .forward(
                                         &attempt,
                                         std::mem::take(provider_body.get().map_err(replay_error)?),
+                                        None,
                                         &mut signature_retry_codex_upstream_format,
                                     )
                                     .await
@@ -1762,6 +1811,7 @@ impl RequestForwarder {
                                 .forward(
                                     &attempt,
                                     std::mem::take(provider_body.get().map_err(replay_error)?),
+                                    None,
                                     &mut budget_retry_codex_upstream_format,
                                 )
                                 .await
@@ -1909,7 +1959,61 @@ impl RequestForwarder {
         &self,
         attempt: &Attempt<'_>,
         body: Value,
+        original_body: Option<&ForwardBody>,
         codex_upstream_format_out: &mut Option<CodexUpstreamFormat>,
+    ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
+        let started = tokio::time::Instant::now();
+        // A rectified body cannot be recovered from the original wire bytes.
+        // Keep it only on Copilot paths, which can retry after a 401.
+        let rectified_replay = (original_body.is_none()
+            && attempt
+                .adapter
+                .extract_base_url(attempt.provider)
+                .is_ok_and(|url| {
+                    is_managed_copilot_request(attempt.app_type, attempt.provider, &url)
+                }))
+        .then(|| body.clone());
+        let mut retry_auto = false;
+        let result = self
+            .forward_once(
+                attempt,
+                body,
+                codex_upstream_format_out,
+                started,
+                &mut retry_auto,
+            )
+            .await;
+        if retry_auto {
+            let body = if let Some(original) = original_body {
+                let mut replay = original.replay()?;
+                self.prepare_provider_body(&mut replay, attempt.provider);
+                replay
+            } else {
+                rectified_replay.ok_or_else(|| {
+                    ProxyError::Internal("Missing rectified Copilot retry body".into())
+                })?
+            };
+            log::info!("[Copilot/Auto] Upstream returned 401, retrying with a fresh route");
+            self.forward_once(
+                attempt,
+                body,
+                codex_upstream_format_out,
+                started,
+                &mut false,
+            )
+            .await
+        } else {
+            result
+        }
+    }
+
+    async fn forward_once(
+        &self,
+        attempt: &Attempt<'_>,
+        body: Value,
+        codex_upstream_format_out: &mut Option<CodexUpstreamFormat>,
+        attempt_started: tokio::time::Instant,
+        retry_auto: &mut bool,
     ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
         let mut diagnostic_attempt = self.diagnostics.as_ref().map(|diagnostics| {
             diagnostics.attempt(
@@ -1925,6 +2029,8 @@ impl RequestForwarder {
                 attempt,
                 body,
                 codex_upstream_format_out,
+                attempt_started,
+                retry_auto,
                 diagnostic_attempt.as_mut(),
             )
             .await;
@@ -1946,11 +2052,14 @@ impl RequestForwarder {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn forward_observed(
         &self,
         attempt: &Attempt<'_>,
         body: Value,
         codex_upstream_format_out: &mut Option<CodexUpstreamFormat>,
+        attempt_started: tokio::time::Instant,
+        retry_auto: &mut bool,
         mut diagnostic_attempt: Option<&mut super::diagnostics::AttemptGuard>,
     ) -> Result<(ProxyResponse, Option<String>, Option<String>), ProxyError> {
         let Attempt {
@@ -1994,6 +2103,8 @@ impl RequestForwarder {
 
         // GitHub Copilot API 使用 /chat/completions（无 /v1 前缀）
         let is_copilot = is_managed_copilot_request(app_type, provider, &base_url);
+        let copilot_request_is_streaming =
+            is_copilot && is_streaming_request(endpoint, &body, headers);
 
         // Codex upstream conversion mode — computed early because the [1m]-suffix strip
         // below must be skipped on the Anthropic path (the marker has to survive to
@@ -2192,27 +2303,66 @@ impl RequestForwarder {
             None
         };
 
-        if is_copilot_claude_body {
-            mapped_body =
-                super::providers::copilot_model_map::apply_copilot_model_normalization(mapped_body);
-            self.apply_copilot_live_model_resolution(provider, &mut mapped_body)
-                .await;
-            // Strip the [1M] context marker after Copilot normalization/resolve.
-            // A user's mapped value (e.g. "gpt-5.6-sol[1M]") carries [1M] as a
-            // Claude Code context-capability declaration that upstream APIs reject
-            // as part of the model name. The preceding normalization step already
-            // rewrites claude-xxx[1M] into the "-1m" dash form Copilot accepts, and
-            // the strip helper only touches the "[1m]" bracket form, so "-1m"
-            // variants pass through unchanged.
-            mapped_body =
-                super::model_mapper::strip_one_m_suffix_for_upstream_from_body(mapped_body);
-        } else if !is_copilot_codex_responses && !codex_responses_to_anthropic {
-            // Skip on the Codex→Anthropic path: stripping [1m] here would break both the
-            // model-catalog match (apply_codex_upstream_model) and the transform's own
-            // strip+`context-1m` beta detection. The marker is stripped later, on the
-            // final anthropic_body.
-            mapped_body =
-                super::model_mapper::strip_one_m_suffix_for_upstream_from_body(mapped_body);
+        // Classify before tool-result rewrites and before spending an Auto lookup on warmup.
+        let run_copilot_optimizer = is_copilot_claude_body && self.copilot_optimizer_config.enabled;
+        let classification = run_copilot_optimizer.then(|| {
+            super::copilot_optimizer::classify_request(
+                &mapped_body,
+                headers.contains_key("anthropic-beta"),
+                self.copilot_optimizer_config.compact_detection,
+                self.copilot_optimizer_config.subagent_detection,
+            )
+        });
+        let warmup = self.copilot_optimizer_config.warmup_downgrade
+            && classification.as_ref().is_some_and(|c| c.is_warmup);
+        let auto_requested = is_copilot
+            && !warmup
+            && mapped_body
+                .get("model")
+                .and_then(Value::as_str)
+                .map(super::model_mapper::strip_one_m_suffix_for_upstream)
+                == Some(super::providers::copilot_auto::COPILOT_AUTO_VIRTUAL_MODEL_ID);
+        let auto_deadline = (auto_requested
+            && (is_copilot_codex_responses
+                || is_copilot_auto_messages_endpoint(endpoint)
+                || is_copilot_auto_chat_endpoint(endpoint)))
+        .then(|| attempt_started + self.copilot_auto_timeout_budget(copilot_request_is_streaming));
+        let auto_route = if let Some(deadline) = auto_deadline {
+            let route = self
+                .resolve_copilot_auto_route(
+                    &Attempt {
+                        provider,
+                        ..*attempt
+                    },
+                    &mapped_body,
+                    deadline,
+                    retry_auto,
+                )
+                .await?;
+            base_url.clone_from(&route.key.api_base);
+            mapped_body["model"] = Value::String(route.model_id.clone());
+            Some(route)
+        } else {
+            None
+        };
+
+        // Preserve the exact model authorized by /auto through protocol selection.
+        if auto_route.is_none() {
+            if is_copilot_claude_body {
+                mapped_body =
+                    super::providers::copilot_model_map::apply_copilot_model_normalization(
+                        mapped_body,
+                    );
+                self.apply_copilot_live_model_resolution(provider, &mut mapped_body)
+                    .await;
+            }
+            // Keep the local [1M] marker until the Codex transport resolves the model.
+            if is_copilot_claude_body
+                || (!is_copilot_codex_responses && !codex_responses_to_anthropic)
+            {
+                mapped_body =
+                    super::model_mapper::strip_one_m_suffix_for_upstream_from_body(mapped_body);
+            }
         }
 
         // --- Copilot 优化器：分类 + 请求体优化（在格式转换之前执行） ---
@@ -2222,18 +2372,7 @@ impl RequestForwarder {
         //   1. 先在原始 body 上分类（保留 tool_result 语义，避免误判为 user）
         //   2. 再清洗孤立 tool_result（防止上游 API 报错）
         //   3. 再合并 tool_result + text（减少 premium 计费）
-        let run_copilot_optimizer = is_copilot_claude_body && self.copilot_optimizer_config.enabled;
-        let copilot_request_context = if run_copilot_optimizer {
-            // 1. 在原始 body 上分类 — 必须在清洗/合并之前执行
-            //    孤立 tool_result 仍保持 tool_result 类型，分类能正确识别为 agent
-            let has_anthropic_beta = headers.contains_key("anthropic-beta");
-            let classification = super::copilot_optimizer::classify_request(
-                &mapped_body,
-                has_anthropic_beta,
-                self.copilot_optimizer_config.compact_detection,
-                self.copilot_optimizer_config.subagent_detection,
-            );
-
+        let copilot_request_context = if let Some(classification) = classification {
             log::debug!(
                 "[Copilot] 优化器分类: initiator={}, is_warmup={}, is_compact={}, is_subagent={}",
                 classification.initiator,
@@ -2249,7 +2388,7 @@ impl RequestForwarder {
             mapped_body = self.copilot_rewrite_tool_results(app_type, mapped_body);
 
             // 4. Warmup 小模型降级
-            if self.copilot_optimizer_config.warmup_downgrade && classification.is_warmup {
+            if warmup {
                 log::info!(
                     "[Copilot] Warmup 请求降级到模型: {}",
                     self.copilot_optimizer_config.warmup_model
@@ -2319,10 +2458,14 @@ impl RequestForwarder {
         // on the Codex bridge. Only auto mode may fall back from Responses to Chat.
         if is_copilot_codex_responses {
             let api_format = CodexCopilotApiFormat::from_meta(provider.meta.as_ref());
-            let resolved = self
-                .resolve_codex_copilot_model(provider, &mapped_body, api_format)
-                .await?;
-            let transport = apply_codex_copilot_model(&mut mapped_body, resolved, api_format)?;
+            let transport = if let Some(route) = &auto_route {
+                route.transport.clone()
+            } else {
+                let resolved = self
+                    .resolve_codex_copilot_model(provider, &mapped_body, api_format)
+                    .await?;
+                apply_codex_copilot_model(&mut mapped_body, resolved, api_format)?
+            };
             copilot_endpoint_override = Some(transport.endpoint);
             codex_responses_to_chat = matches!(transport.protocol, CopilotProtocol::Chat);
             codex_responses_to_anthropic = false;
@@ -2345,10 +2488,9 @@ impl RequestForwarder {
 
         // GitHub Copilot 动态 endpoint 路由
         // 从 CopilotAuthManager 获取缓存的 API endpoint（支持企业版等非默认 endpoint）
-        if is_copilot && !is_full_url {
-            if let Some(app_handle) = &self.app_handle {
-                let copilot_state = app_handle.state::<CopilotAuthState>();
-                let copilot_auth = copilot_state.0.read().await;
+        if is_copilot && !is_full_url && auto_route.is_none() {
+            if let Some(auth) = self.copilot_auth() {
+                let copilot_auth = auth.read().await;
 
                 // 从 provider.meta 获取关联的 GitHub 账号 ID
                 let account_id = provider
@@ -2373,9 +2515,17 @@ impl RequestForwarder {
             }
         }
         let resolved_claude_api_format = if adapter.name() == "Claude" {
-            let resolved = self
-                .resolve_claude_api_format(provider, &mapped_body, is_copilot)
-                .await;
+            let resolved = if let Some(route) = &auto_route {
+                match route.transport.protocol {
+                    CopilotProtocol::Messages => "anthropic",
+                    CopilotProtocol::Responses => "openai_responses",
+                    CopilotProtocol::Chat => "openai_chat",
+                }
+                .to_string()
+            } else {
+                self.resolve_claude_api_format(provider, &mapped_body, is_copilot)
+                    .await
+            };
             let use_virtual_tools =
                 resolved == "openai_chat" && super::providers::tool_virtual::is_enabled(provider);
             Some(if use_virtual_tools {
@@ -2939,9 +3089,13 @@ impl RequestForwarder {
         let mut auth_headers = if let Some(mut auth) = adapter.extract_auth(provider) {
             // GitHub Copilot 特殊处理：从 CopilotAuthManager 获取真实 token
             if auth.strategy == AuthStrategy::GitHubCopilot {
-                let token = self
-                    .copilot_access_token(provider, prepared_account.as_ref())
-                    .await?;
+                let token = match &auto_route {
+                    Some(route) => route.access_token.clone(),
+                    None => {
+                        self.copilot_access_token(provider, prepared_account.as_ref())
+                            .await?
+                    }
+                };
                 auth = AuthInfo::new(token, AuthStrategy::GitHubCopilot);
             }
 
@@ -3105,6 +3259,13 @@ impl RequestForwarder {
             anthropic_beta_value,
             should_send_anthropic_headers,
             codex_oauth_session_headers,
+            copilot_auto_session_token: auto_route
+                .as_ref()
+                .map(|route| http::HeaderValue::from_str(&route.session_token))
+                .transpose()
+                .map_err(|_| {
+                    ProxyError::ConfigError("Invalid Copilot Auto session token".into())
+                })?,
         }
         .build(headers);
 
@@ -3222,6 +3383,7 @@ impl RequestForwarder {
                 body_bytes,
                 request_is_streaming,
                 preserve_exact_header_case,
+                auto_deadline,
             )
             .await?;
 
@@ -3240,6 +3402,23 @@ impl RequestForwarder {
             Some(attempt) => attempt.observe(response),
             None => response,
         };
+
+        if let Some(route) = &auto_route {
+            if status == http::StatusCode::UNAUTHORIZED {
+                if let Some(auth) = self.copilot_auth() {
+                    auth.read()
+                        .await
+                        .invalidate_token_if_matches(&route.key.account_id, &route.access_token)
+                        .await;
+                }
+                self.copilot_auto_sessions
+                    .invalidate_if_token_matches(&route.key, &route.session_token)
+                    .await;
+                *retry_auto = true;
+            } else if status.is_success() {
+                self.copilot_auto_sessions.touch(&route.key).await;
+            }
+        }
 
         if status.is_success() {
             // Fork 扩展：2xx 却是 HTML/Cloudflare 挑战页（非 API 响应）→ 转成可重试的
@@ -3262,6 +3441,7 @@ impl RequestForwarder {
                     codex_responses_to_anthropic,
                     resolved_claude_api_format.as_deref(),
                     opaque_state_request.as_ref(),
+                    auto_deadline,
                 )
                 .await?;
             // Fork 扩展：响应侧可编程中间件（onResponse 非流式 / onEvent 流式）。
@@ -3287,6 +3467,18 @@ impl RequestForwarder {
                     self.response_middleware.on_event.script.clone(),
                     meta,
                 );
+            }
+            if let Some(route) = auto_route {
+                if route.compaction {
+                    let sessions = self.copilot_auto_sessions.clone();
+                    response = response.with_success_terminal_hook(Box::new(move || {
+                        Box::pin(async move {
+                            sessions
+                                .invalidate_if_token_matches(&route.key, &route.session_token)
+                                .await;
+                        })
+                    }));
+                }
             }
             Ok((response, resolved_claude_api_format, outbound_model))
         } else {
