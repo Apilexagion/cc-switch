@@ -2261,11 +2261,13 @@ function ProviderFormFull({
           : undefined,
       codexFastMode: isClaudeCodexOauthProvider ? codexFastMode : undefined,
       codexSessionIdentityRotation:
-        appId === "codex" ? codexSessionAutoContinuation : undefined,
+        appId === "codex" && codexSessionAutoContinuation ? true : undefined,
       codexSessionHistoryArchive:
-        appId === "codex" ? codexSessionAutoContinuation : undefined,
+        appId === "codex" && codexSessionAutoContinuation ? true : undefined,
       codexSessionIdentityDiagnostics:
-        appId === "codex" ? codexSessionIdentityDiagnostics : undefined,
+        appId === "codex" && codexSessionIdentityDiagnostics
+          ? true
+          : undefined,
       codexChatReasoning:
         appId === "codex" && category !== "official" && isCodexChatFormat
           ? normalizeCodexChatReasoningForSave(codexChatReasoning)

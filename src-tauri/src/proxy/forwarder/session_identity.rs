@@ -385,42 +385,6 @@ impl RequestForwarder {
     }
 }
 
-#[cfg(test)]
-mod preflight_tests {
-    use super::*;
-    use futures::StreamExt;
-    use std::time::Duration;
-
-    #[tokio::test]
-    async fn preflight_read_error_replays_buffered_events_before_the_error() {
-        let first = Bytes::from_static(
-            b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
-        );
-        let source = futures::stream::iter(vec![
-            Ok(first.clone()),
-            Err(std::io::Error::other(
-                "connection closed before message completed",
-            )),
-        ]);
-        let response =
-            ProxyResponse::streamed(http::StatusCode::OK, http::HeaderMap::new(), source);
-
-        let response = RequestForwarder::hold_session_identity_stream(response, Duration::ZERO)
-            .await
-            .expect("预读失败仍应返回可透传的响应流");
-        assert_eq!(response.status(), http::StatusCode::OK);
-
-        let mut stream = Box::pin(response.bytes_stream());
-        assert_eq!(stream.next().await.unwrap().unwrap(), first);
-        let error = stream.next().await.unwrap().unwrap_err();
-        assert_eq!(
-            error.to_string(),
-            "connection closed before message completed"
-        );
-        assert!(stream.next().await.is_none());
-    }
-}
-
 fn identity_limit_envelope(bytes: &[u8]) -> Option<ProxyError> {
     let value: Value = serde_json::from_slice(bytes).ok()?;
     let response = value.get("response").unwrap_or(&value);
@@ -478,5 +442,41 @@ fn identity_stream_start(block: &str) -> IdentityStreamStart {
         .map(IdentityStreamStart::Limit)
         .unwrap_or(IdentityStreamStart::Commit),
         _ => IdentityStreamStart::Commit,
+    }
+}
+
+#[cfg(test)]
+mod preflight_tests {
+    use super::*;
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn preflight_read_error_replays_buffered_events_before_the_error() {
+        let first = Bytes::from_static(
+            b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
+        );
+        let source = futures::stream::iter(vec![
+            Ok(first.clone()),
+            Err(std::io::Error::other(
+                "connection closed before message completed",
+            )),
+        ]);
+        let response =
+            ProxyResponse::streamed(http::StatusCode::OK, http::HeaderMap::new(), source);
+
+        let response = RequestForwarder::hold_session_identity_stream(response, Duration::ZERO)
+            .await
+            .expect("预读失败仍应返回可透传的响应流");
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        let mut stream = Box::pin(response.bytes_stream());
+        assert_eq!(stream.next().await.unwrap().unwrap(), first);
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "connection closed before message completed"
+        );
+        assert!(stream.next().await.is_none());
     }
 }

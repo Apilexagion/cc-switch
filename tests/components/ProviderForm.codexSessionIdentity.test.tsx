@@ -51,8 +51,12 @@ function formElement(
   );
 }
 
+function persistedMeta(meta: ProviderMeta | undefined): ProviderMeta {
+  return JSON.parse(JSON.stringify(meta ?? {})) as ProviderMeta;
+}
+
 describe("Codex 供应商会话身份设置", () => {
-  it("旧配置默认关闭，保存显式关闭值", async () => {
+  it("旧配置默认关闭，保存时不写入默认关闭字段", async () => {
     const onSubmit = vi.fn<(values: ProviderFormValues) => void>();
     render(formElement(undefined, onSubmit));
     expect(
@@ -68,11 +72,10 @@ describe("Codex 供应商会话身份设置", () => {
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "保存供应商" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0].meta).toMatchObject({
-      codexSessionIdentityRotation: false,
-      codexSessionHistoryArchive: false,
-      codexSessionIdentityDiagnostics: false,
-    });
+    const saved = persistedMeta(onSubmit.mock.calls[0][0].meta);
+    expect(saved).not.toHaveProperty("codexSessionIdentityRotation");
+    expect(saved).not.toHaveProperty("codexSessionHistoryArchive");
+    expect(saved).not.toHaveProperty("codexSessionIdentityDiagnostics");
   });
 
   it.each(["direct", "route", "stack"] as const)(
@@ -101,11 +104,12 @@ describe("Codex 供应商会话身份设置", () => {
       fireEvent.click(screen.getByRole("switch", { name: diagnosticsLabel }));
       fireEvent.click(screen.getByRole("button", { name: "保存供应商" }));
       await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
-      expect(onSubmit.mock.calls[1][0].meta).toMatchObject({
+      const persisted = persistedMeta(onSubmit.mock.calls[1][0].meta);
+      expect(persisted).toMatchObject({
         codexSessionIdentityRotation: true,
         codexSessionHistoryArchive: true,
-        codexSessionIdentityDiagnostics: false,
       });
+      expect(persisted).not.toHaveProperty("codexSessionIdentityDiagnostics");
     },
   );
 
@@ -156,7 +160,7 @@ describe("Codex 供应商会话身份设置", () => {
     });
   });
 
-  it("旧配置只有历史归档时按关闭处理，保存时规范化两个字段", async () => {
+  it("旧配置只有历史归档时按关闭处理，保存时清除两个兼容字段", async () => {
     const onSubmit = vi.fn<(values: ProviderFormValues) => void>();
     render(
       formElement(
@@ -172,10 +176,9 @@ describe("Codex 供应商会话身份设置", () => {
     ).not.toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "保存供应商" }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
-    expect(onSubmit.mock.calls[0][0].meta).toMatchObject({
-      codexSessionIdentityRotation: false,
-      codexSessionHistoryArchive: false,
-    });
+    const saved = persistedMeta(onSubmit.mock.calls[0][0].meta);
+    expect(saved).not.toHaveProperty("codexSessionIdentityRotation");
+    expect(saved).not.toHaveProperty("codexSessionHistoryArchive");
   });
 
   it.each(["openai_chat", "anthropic"] as const)(
@@ -195,6 +198,9 @@ describe("Codex 供应商会话身份设置", () => {
         /只适用于经本地代理转发的第三方原生 Responses/,
       );
       expect(scopeDescription).toBeVisible();
+      expect(
+        screen.getByText(/预读 SSE 开头直到出现输出/),
+      ).toBeVisible();
       expect(scopeDescription).toHaveTextContent(
         /官方 ChatGPT \/ Codex OAuth、直连及 Chat \/ Anthropic 转换不生效/,
       );

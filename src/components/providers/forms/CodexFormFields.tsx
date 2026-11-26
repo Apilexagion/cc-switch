@@ -1512,6 +1512,12 @@ export function CodexFormFields({
               "默认关闭，各供应商独立保存。只适用于经本地代理转发的第三方原生 Responses；官方 ChatGPT / Codex OAuth、直连及 Chat / Anthropic 转换不生效。开启后会同时启用身份轮换和完整历史归档；不会自动压缩、清空或摘要上下文。",
           })}
         </p>
+        <p className="text-xs leading-relaxed text-fg-2">
+          {t("codexConfig.sessionAutoContinuationStreamNotice", {
+            defaultValue:
+              "为识别 HTTP 200 流中的可重试到限错误，代理会预读 SSE 开头直到出现输出，最多 256 KB 或 10 秒（已配置首字节超时则更短）；超出此窗口才出现的到限错误不会触发重试。",
+          })}
+        </p>
         {onSessionIdentityDiagnosticsChange && (
           <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
             {labelWithHelp(
