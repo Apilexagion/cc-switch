@@ -189,6 +189,12 @@ impl Ticket {
             r.phase = Phase::Answering;
         });
     }
+    pub(super) fn failed(self, status: u16) {
+        self.update(|row| {
+            row.status = Some(status);
+            row.phase = Phase::Failed;
+        });
+    }
     pub(super) fn usage(self, usage: &TokenUsage, first: Option<u64>) {
         if !usage.has_billable_tokens() {
             return;
@@ -245,6 +251,25 @@ struct Completion {
     finished: bool,
 }
 impl Completion {
+    fn headers(&mut self, status: StatusCode) {
+        self.status = Some(status);
+        if let Some(ticket) = self.slot.0.get() {
+            ticket.update(|row| {
+                // Codex receives local transport failures as HTTP 200 with a
+                // response.failed event. Retain the forwarding result already
+                // recorded by the request wrapper.
+                if row.phase != Phase::Failed {
+                    row.status = Some(status.as_u16());
+                    row.phase = if status.is_success() {
+                        Phase::Answering
+                    } else {
+                        Phase::Failed
+                    };
+                }
+            });
+        }
+    }
+
     fn finish(&mut self, phase: Phase) {
         if self.finished {
             return;
@@ -252,11 +277,12 @@ impl Completion {
         self.finished = true;
         if let Some(t) = self.slot.0.get() {
             t.update(|r| {
-                r.phase = if self.status.is_some_and(|s| !s.is_success()) {
-                    Phase::Failed
-                } else {
-                    phase
-                };
+                r.phase =
+                    if r.phase == Phase::Failed || self.status.is_some_and(|s| !s.is_success()) {
+                        Phase::Failed
+                    } else {
+                        phase
+                    };
                 r.duration_ms = Some(r.start.elapsed().as_millis() as u64);
             });
         }
@@ -310,19 +336,10 @@ pub(crate) async fn observe(mut req: Request, next: Next) -> Response {
         finished: false,
     };
     let res = next.run(req).await;
-    let Some(ticket) = completion.slot.0.get().copied() else {
+    if completion.slot.0.get().is_none() {
         return res;
-    };
-    let status = res.status();
-    ticket.update(|r| {
-        r.status = Some(status.as_u16());
-        r.phase = if status.is_success() {
-            Phase::Answering
-        } else {
-            Phase::Failed
-        };
-    });
-    completion.status = Some(status);
+    }
+    completion.headers(res.status());
     if res.body().is_end_stream() {
         completion.finish(Phase::Done);
         return res;
@@ -452,6 +469,93 @@ mod tests {
             Some(8),
         );
         assert_eq!(row(a).tokens, Some(110));
+    }
+
+    #[tokio::test]
+    async fn failed_forwarding_survives_a_successful_codex_error_envelope() {
+        let (extensions, ticket) = desktop_request("failed-child");
+        ticket.attempt("upstream");
+        ticket.failed(502);
+
+        let mut completion = Completion {
+            slot: extensions.get::<Slot>().unwrap().clone(),
+            status: None,
+            finished: false,
+        };
+        completion.headers(StatusCode::OK);
+        assert!(matches!(row(ticket).phase, Phase::Failed));
+        assert_eq!(row(ticket).status, Some(502));
+
+        let payload = Bytes::from_static(
+            b"event: response.failed\ndata: {\"response\":{\"status\":\"failed\"}}\n\n",
+        );
+        let body = TrackedBody {
+            body: Body::from(payload.clone()),
+            completion,
+        };
+        assert_eq!(body.collect().await.unwrap().to_bytes(), payload);
+        let completed = row(ticket);
+        assert!(matches!(completed.phase, Phase::Failed));
+        assert_eq!(completed.status, Some(502));
+        assert!(completed.duration_ms.is_some());
+    }
+
+    #[tokio::test]
+    async fn single_stack_provider_failure_updates_its_route_ticket() {
+        use crate::app_config::AppType;
+        use crate::proxy::{
+            forwarder::ForwardBody, handler_context::RequestContext, server::ProxyState,
+        };
+
+        let db = Arc::new(crate::database::Database::memory().unwrap());
+        let state = ProxyState::for_test(db);
+        let provider = crate::provider::Provider::with_id(
+            "failed-local-fixture".into(),
+            "Fixture".into(),
+            json!({
+                "auth": {"OPENAI_API_KEY": "fixture-key"},
+                "config": "model_provider = \"fixture\"\n[model_providers.fixture]\nbase_url = \"http://127.0.0.1:0/v1\"\nwire_api = \"responses\"\n"
+            }),
+            None,
+        );
+        let body = json!({"model":"fixture-model","input":[],"stream":true});
+        let headers = HeaderMap::new();
+        let mut context = RequestContext::new(
+            &state,
+            &body,
+            &headers,
+            AppType::Codex,
+            "Codex",
+            "codex",
+            Some(crate::mode::stack::StackTarget {
+                provider,
+                upstream_model: "fixture-model".into(),
+                original_model: "ccs-fixture/fixture-model".into(),
+            }),
+            None,
+        )
+        .await
+        .unwrap();
+        let mut extensions = Extensions::new();
+        extensions.insert(Slot::default());
+        context.track_route(&extensions, &headers, &body);
+        let ticket = ticket(&extensions).unwrap();
+        let result = context
+            .create_forwarder(&state)
+            .forward_with_retry(
+                &AppType::Codex,
+                Method::POST,
+                "/responses",
+                ForwardBody::from_parsed(body.clone(), Bytes::from(body.to_string())),
+                headers,
+                extensions,
+                context.get_providers(),
+            )
+            .await;
+        assert!(result.is_err());
+        let failed = row(ticket);
+        assert!(matches!(failed.phase, Phase::Failed));
+        assert_eq!(failed.status, Some(502));
     }
 
     #[test]

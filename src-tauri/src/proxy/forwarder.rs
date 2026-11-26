@@ -973,24 +973,25 @@ impl RequestForwarder {
         extensions: Extensions,
         providers: &[Provider],
     ) -> Result<ForwardResult, ForwardError> {
-        if !self.routing_state_enabled() {
-            return self
-                .forward_with_retry_inner(
-                    app_type, method, endpoint, body, headers, extensions, providers,
-                )
-                .await;
-        }
-        let guard = ActiveConnectionGuard::acquire(self.status.clone()).await;
+        let ticket = super::route_activity::ticket(&extensions);
+        let guard = if self.routing_state_enabled() {
+            Some(ActiveConnectionGuard::acquire(self.status.clone()).await)
+        } else {
+            None
+        };
         let result = self
             .forward_with_retry_inner(
                 app_type, method, endpoint, body, headers, extensions, providers,
             )
             .await;
+        if let (Some(ticket), Err(error)) = (ticket, &result) {
+            ticket.failed(super::error_mapper::map_proxy_error_to_status(&error.error));
+        }
         // 把 guard 注入到 Ok 结果，让它随响应一起流转到 response_processor，
         // 在流式 body 的 future 内才真正 drop。
         // Err 路径：guard 在函数 scope 内随返回值落地时自动 drop。
         result.map(|mut fr| {
-            fr.connection_guard = Some(guard);
+            fr.connection_guard = guard;
             fr
         })
     }
