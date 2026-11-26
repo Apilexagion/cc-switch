@@ -309,21 +309,21 @@ impl RequestForwarder {
             }
             return Ok(ProxyResponse::buffered(status, headers, bytes));
         }
-        self.hold_session_identity_stream(response).await
+        Self::hold_session_identity_stream(response, self.streaming_first_byte_timeout).await
     }
 
     /// 只在首个有效输出前观察错误；遇到输出/未知事件/截止条件立即原样交出已缓冲字节。
     /// 交出后不再有任何路径回到 send 循环，因此不会把用户已看到的内容重放。
     async fn hold_session_identity_stream(
-        &self,
         response: ProxyResponse,
+        streaming_first_byte_timeout: std::time::Duration,
     ) -> Result<ProxyResponse, ProxyError> {
         const MAX_HOLD_BYTES: usize = 256 * 1024;
         let max_hold = std::time::Duration::from_secs(10);
-        let window = if self.streaming_first_byte_timeout.is_zero() {
+        let window = if streaming_first_byte_timeout.is_zero() {
             max_hold
         } else {
-            max_hold.min(self.streaming_first_byte_timeout)
+            max_hold.min(streaming_first_byte_timeout)
         };
         let deadline = tokio::time::Instant::now() + window;
         let status = response.status();
@@ -344,8 +344,19 @@ impl RequestForwarder {
                 }
                 break;
             };
-            let chunk = chunk
-                .map_err(|e| ProxyError::ForwardFailed(format!("读取身份轮换判流失败: {e}")))?;
+            let chunk = match chunk {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    // 预读期间若上游断流，先把已读取的字节和原始传输错误交给调用方。
+                    // 不能在构造 ProxyResponse 前直接返回本地错误，否则会吞掉这些字节，
+                    // 把原本的 HTTP 200 半截 SSE 改成代理生成的 HTTP 错误响应。
+                    let failed = futures::stream::once(async move { Err(error) });
+                    let replay = futures::stream::iter(chunks.into_iter().map(Ok))
+                        .chain(failed)
+                        .chain(stream);
+                    return Ok(ProxyResponse::streamed(status, headers, replay));
+                }
+            };
             held += chunk.len();
             sse.push_bytes(&chunk).map_err(|_| {
                 ProxyError::ResponseBodyTooLarge(crate::proxy::sse::MAX_SSE_EVENT_BYTES)
@@ -371,6 +382,42 @@ impl RequestForwarder {
         }
         let replay = futures::stream::iter(chunks.into_iter().map(Ok)).chain(stream);
         Ok(ProxyResponse::streamed(status, headers, replay))
+    }
+}
+
+#[cfg(test)]
+mod preflight_tests {
+    use super::*;
+    use futures::StreamExt;
+    use std::time::Duration;
+
+    #[tokio::test]
+    async fn preflight_read_error_replays_buffered_events_before_the_error() {
+        let first = Bytes::from_static(
+            b"event: response.created\ndata: {\"type\":\"response.created\"}\n\n",
+        );
+        let source = futures::stream::iter(vec![
+            Ok(first.clone()),
+            Err(std::io::Error::other(
+                "connection closed before message completed",
+            )),
+        ]);
+        let response =
+            ProxyResponse::streamed(http::StatusCode::OK, http::HeaderMap::new(), source);
+
+        let response = RequestForwarder::hold_session_identity_stream(response, Duration::ZERO)
+            .await
+            .expect("预读失败仍应返回可透传的响应流");
+        assert_eq!(response.status(), http::StatusCode::OK);
+
+        let mut stream = Box::pin(response.bytes_stream());
+        assert_eq!(stream.next().await.unwrap().unwrap(), first);
+        let error = stream.next().await.unwrap().unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "connection closed before message completed"
+        );
+        assert!(stream.next().await.is_none());
     }
 }
 
