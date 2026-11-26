@@ -98,7 +98,7 @@ impl NoticeStream {
         let mut started = item.clone();
         started["status"] = json!("in_progress");
         started["content"] = json!([]);
-        let mut events = vec![
+        let mut events = [
             json!({"type":"response.output_item.added","output_index":index,"item":started}),
             json!({"type":"response.content_part.added","item_id":id,"output_index":index,"content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}),
             json!({"type":"response.output_text.delta","item_id":id,"output_index":index,"content_index":0,"delta":text}),

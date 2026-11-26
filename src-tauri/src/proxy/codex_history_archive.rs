@@ -15,6 +15,7 @@ pub(crate) enum ReasoningMode {
     /// 保留原生推理条目及密文，不改变其协议语义。
     Native,
     /// 完整保存推理 JSON，但它不再是可由上游处理的原生推理状态。
+    #[cfg(test)]
     Archive,
 }
 
