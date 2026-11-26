@@ -402,6 +402,7 @@ fn test_forwarder(
         stack_request: false,
         failover_chain: false,
         last_outbound_model: std::sync::Mutex::new(None),
+        session_identity_retried: std::sync::Mutex::new(Default::default()),
         privacy_filter: PrivacyFilterConfig::default(),
     }
 }
@@ -6258,3 +6259,5 @@ fn no_op_copilot_rewrites_do_not_require_another_privacy_scan() {
         assert_eq!(merged, body);
     }
 }
+#[path = "session_identity_tests.rs"]
+mod session_identity_tests;

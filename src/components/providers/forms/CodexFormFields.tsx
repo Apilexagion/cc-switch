@@ -244,6 +244,11 @@ interface CodexFormFieldsProps {
   onMaxOutputTokensChange: (value: string) => void;
   codexChatReasoning?: CodexChatReasoning;
   onCodexChatReasoningChange?: (value: CodexChatReasoning) => void;
+  // 会话设置均按供应商保存；转换路径保留配置但不执行自动续聊。
+  sessionAutoContinuation?: boolean;
+  onSessionAutoContinuationChange?: (value: boolean) => void;
+  sessionIdentityDiagnostics?: boolean;
+  onSessionIdentityDiagnosticsChange?: (value: boolean) => void;
   promptCacheRouting: PromptCacheRoutingMode;
   onPromptCacheRoutingChange: (value: PromptCacheRoutingMode) => void;
 
@@ -719,6 +724,10 @@ export function CodexFormFields({
   onMaxOutputTokensChange,
   codexChatReasoning = {},
   onCodexChatReasoningChange,
+  sessionAutoContinuation = false,
+  onSessionAutoContinuationChange,
+  sessionIdentityDiagnostics = false,
+  onSessionIdentityDiagnosticsChange,
   promptCacheRouting,
   onPromptCacheRoutingChange,
   catalogModels = [],
@@ -1471,6 +1480,60 @@ export function CodexFormFields({
             defaultValue: "保留官方 Fast 档",
           })}
         />
+      </div>
+    );
+
+  const sessionIdentityFields = appId === "codex" &&
+    onSessionAutoContinuationChange && (
+      <div className="space-y-3 rounded-lg border border-border p-4">
+        <div className="flex items-center justify-between gap-4">
+          {labelWithHelp(
+            t("codexConfig.sessionAutoContinuationLabel", {
+              defaultValue: "解除中转站轮次限制",
+            }),
+            t("codexConfig.sessionAutoContinuationHint", {
+              defaultValue:
+                "仅本地代理、路由接管和聚合模式的第三方 Codex 原生 Responses 转发适用。明确收到会话轮数上限错误后，为本供应商下的当前会话更换上游身份，并保留完整聊天记录继续对话；最多自动重试一次，后续请求沿用新身份。官方 ChatGPT / Codex OAuth、直连及 Chat / Anthropic 转换不生效。上游若按其他信息计数，仍可能失败。",
+            }),
+            "codex-session-auto-continuation",
+          )}
+          <Switch
+            id="codex-session-auto-continuation"
+            checked={sessionAutoContinuation}
+            onCheckedChange={onSessionAutoContinuationChange}
+            aria-label={t("codexConfig.sessionAutoContinuationLabel", {
+              defaultValue: "解除中转站轮次限制",
+            })}
+          />
+        </div>
+        <p className="text-xs leading-relaxed text-fg-2">
+          {t("codexConfig.sessionAutoContinuationScope", {
+            defaultValue:
+              "默认关闭，各供应商独立保存。只适用于经本地代理转发的第三方原生 Responses；官方 ChatGPT / Codex OAuth、直连及 Chat / Anthropic 转换不生效。开启后会同时启用身份轮换和完整历史归档；不会自动压缩、清空或摘要上下文。",
+          })}
+        </p>
+        {onSessionIdentityDiagnosticsChange && (
+          <div className="flex items-center justify-between gap-4 border-t border-border pt-3">
+            {labelWithHelp(
+              t("codexConfig.sessionIdentityDiagnosticsLabel", {
+                defaultValue: "启用会话身份脱敏诊断",
+              }),
+              t("codexConfig.sessionIdentityDiagnosticsHint", {
+                defaultValue:
+                  "默认关闭。仅记录必要的身份哈希、字段数量及重试结果，不记录原始会话标识、路由状态、密钥或对话正文；排查完可关闭。",
+              }),
+              "codex-session-identity-diagnostics",
+            )}
+            <Switch
+              id="codex-session-identity-diagnostics"
+              checked={sessionIdentityDiagnostics}
+              onCheckedChange={onSessionIdentityDiagnosticsChange}
+              aria-label={t("codexConfig.sessionIdentityDiagnosticsLabel", {
+                defaultValue: "启用会话身份脱敏诊断",
+              })}
+            />
+          </div>
+        )}
       </div>
     );
 
@@ -2249,6 +2312,7 @@ export function CodexFormFields({
         {apiKeySection}
         {showFormatFields && isAnthropicFormat && anthropicAuthFieldSelect}
         {endpointSection}
+        {sessionIdentityFields}
         {instructionFields}
 
         {canEditCatalog && (
@@ -2374,6 +2438,7 @@ export function CodexFormFields({
       {oauthSections}
       {apiKeySection}
       {endpointSection}
+      {sessionIdentityFields}
       {instructionFields}
 
       {/* 模型列表 —— 生成 Codex 的模型目录（model_catalog_json）：/model 菜单列哪些模型，
