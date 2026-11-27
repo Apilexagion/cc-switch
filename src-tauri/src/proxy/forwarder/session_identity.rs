@@ -7,13 +7,37 @@ use crate::proxy::codex_session_identity::{self, ApplyReport, Lease, Snapshot};
 const ITEM_IDENTITY_FIELDS: &[&str] = &["type", "role", "name", "id", "call_id", "turn_id"];
 const CIPHERTEXT_FIELDS: &[&str] = &["encrypted_content", "encrypted_function_args"];
 
-/// 完整保留原生指令、工具定义和推理密文，只把历史输出封装为可恢复的文字记录。
-pub(super) fn archive_history(body: &Value, diagnostics: bool) -> Result<Value, ProxyError> {
-    match codex_history_archive::build(body, ReasoningMode::Native) {
+pub(super) fn reasoning_store_dir() -> std::path::PathBuf {
+    #[cfg(test)]
+    {
+        static STORE: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
+        STORE
+            .get_or_init(|| tempfile::tempdir().expect("隔离推理归档测试目录"))
+            .path()
+            .to_path_buf()
+    }
+    #[cfg(not(test))]
+    {
+        crate::config::get_app_config_dir().join("codex-reasoning-archive")
+    }
+}
+
+/// 指令、工具定义和密文完整保留；兼容模式将推理 JSON 归档为数据，不再重放原生状态。
+pub(super) fn archive_history(
+    body: &Value,
+    diagnostics: bool,
+    archive_reasoning: bool,
+) -> Result<Value, ProxyError> {
+    let result = if archive_reasoning {
+        codex_history_archive::build_with_reasoning_store(body, &reasoning_store_dir())
+    } else {
+        codex_history_archive::build(body, ReasoningMode::Native)
+    };
+    match result {
         Ok(Some(archived)) => {
             if diagnostics {
                 let stats = &archived.stats;
-                log::info!("[CodexSessionArchive] original_items={} archived_items={} archive_messages={} archive_json_bytes={} native_reasoning_items={}", stats.original_items, stats.archived_items, stats.archive_messages, stats.archive_json_bytes, stats.native_reasoning_items);
+                log::info!("[CodexSessionArchive] original_items={} archived_items={} archive_messages={} archive_json_bytes={} native_reasoning_items={} archived_reasoning_items={}", stats.original_items, stats.archived_items, stats.archive_messages, stats.archive_json_bytes, stats.native_reasoning_items, stats.archived_reasoning_items);
             }
             Ok(archived.body)
         }
@@ -227,24 +251,54 @@ impl RequestForwarder {
                     };
                     let limit = matches!(&error, ProxyError::UpstreamError { status, body: Some(body) }
                         if codex_session_identity::is_turn_limit(*status, body));
-                    // 预算属于客户端请求和供应商，其他整流器再次调用 forward() 也不能重置。
-                    let may_retry = limit
-                        && self
+                    // 仅明确到限可消耗预算；普通轮换后仍到限，且存在原生推理时才升级一次。
+                    // 预算属于客户端请求和供应商，外层整流器不能重置它。
+                    let recover_reasoning = archive_on_limit
+                        && !current.archive_reasoning()
+                        && baseline
+                            .1
+                            .get("input")
+                            .and_then(Value::as_array)
+                            .is_some_and(|items| {
+                                items.iter().any(|item| {
+                                    item.get("type").and_then(Value::as_str) == Some("reasoning")
+                                })
+                            });
+                    let retry = if limit {
+                        let mut budgets = self
                             .session_identity_retried
                             .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .insert(provider_id.to_string());
+                            .unwrap_or_else(|e| e.into_inner());
+                        let used = budgets.entry(provider_id.to_string()).or_default();
+                        match *used {
+                            0 => {
+                                *used = 1;
+                                Some(false)
+                            }
+                            1 if recover_reasoning => {
+                                *used = 2;
+                                Some(true)
+                            }
+                            _ => None,
+                        }
+                    } else {
+                        None
+                    };
                     if diagnostics {
                         lease.log(
                             &current,
                             &ApplyReport::default(),
-                            if may_retry { "limit_retry" } else { "failed" },
+                            match retry {
+                                Some(true) => "reasoning_archive_retry",
+                                Some(false) => "limit_retry",
+                                None => "failed",
+                            },
                             status,
                         );
                     }
-                    if !may_retry {
+                    let Some(recover_reasoning) = retry else {
                         return Err(error);
-                    }
+                    };
                     // 轮数只使用明确到限错误提供的值；未知时不猜测客户端累计回合。
                     let turn_count = match &error {
                         ProxyError::UpstreamError {
@@ -252,13 +306,22 @@ impl RequestForwarder {
                         } => super::session_identity_notice::turn_count(body),
                         _ => None,
                     };
-                    retry_notice = Some(super::session_identity_notice::notice_text(turn_count));
-                    current = lease.rotate(&current);
+                    current = if recover_reasoning {
+                        lease.rotate_archiving_reasoning(&current)
+                    } else {
+                        lease.rotate(&current)
+                    };
+                    let mut notice = super::session_identity_notice::notice_text(turn_count);
+                    if current.archive_reasoning() && archive_on_limit {
+                        notice.push_str("历史推理数据已完整归档，不再复用原生推理状态。");
+                    }
+                    retry_notice = Some(notice);
                     // 同一份已经定稿的上下文：不执行 /compact，不删除引用，不重新跑中间件。
                     headers = baseline.0.clone();
                     let mut retry_body = baseline.1.clone();
                     if archive_on_limit {
-                        retry_body = archive_history(&retry_body, diagnostics)?;
+                        retry_body =
+                            archive_history(&retry_body, diagnostics, current.archive_reasoning())?;
                     }
                     let report = lease.apply(&current, &mut headers, &mut retry_body);
                     body_bytes = serde_json::to_vec(&retry_body).map_err(|e| {

@@ -264,8 +264,8 @@ pub struct RequestForwarder {
     /// 最近一次 `forward()` 定下的出站模型名，失败时随 [`ForwardError`] 交给日志。
     /// 每次 `forward()` 开头清空，映射失败等没走到出站的尝试留 None（日志回落到请求名）。
     last_outbound_model: std::sync::Mutex<Option<String>>,
-    /// 请求级预算：同一供应商在所有整流/账号重试中最多自动轮换重试一次。
-    session_identity_retried: std::sync::Mutex<std::collections::HashSet<String>>,
+    /// 请求级预算：普通轮换一次；仍明确到限且推理归档能改变正文时再升级一次。
+    session_identity_retried: std::sync::Mutex<std::collections::HashMap<String, u8>>,
     /// 隐私过滤配置。在 [`Self::forward`] 里对定稿的上游请求体执行，每次尝试都会执行。
     privacy_filter: PrivacyFilterConfig,
     #[cfg(test)]
@@ -3421,6 +3421,7 @@ impl RequestForwarder {
                     filtered_body = session_identity::archive_history(
                         &filtered_body,
                         session_identity_diagnostics,
+                        snapshot.archive_reasoning(),
                     )?;
                 }
             }

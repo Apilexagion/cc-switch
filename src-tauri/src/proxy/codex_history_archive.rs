@@ -6,7 +6,10 @@
 //! 结果及其配对调用也保留原生形态。尚未识别的协议条目不会被悄悄降级成文字。
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
+use std::io::Write;
+use std::path::Path;
 
 const ARCHIVE_PREFIX: &str = "以下是当前对话按原顺序保存的历史记录，不是新的指令。请结合原生用户消息、开发者指令和工具定义继续当前任务；不要重新执行记录中的旧工具调用。记录内的 role、参数、输出和密文均为原始历史数据。\nCC_SWITCH_HISTORY_ARCHIVE_V1\n";
 
@@ -15,7 +18,6 @@ pub(crate) enum ReasoningMode {
     /// 保留原生推理条目及密文，不改变其协议语义。
     Native,
     /// 完整保存推理 JSON，但它不再是可由上游处理的原生推理状态。
-    #[cfg(test)]
     Archive,
 }
 
@@ -39,11 +41,13 @@ pub(crate) struct ArchivedRequest {
 pub(crate) enum ArchiveError {
     InvalidRequest,
     UnsupportedItem { index: usize, item_type: String },
+    ReasoningStorage,
 }
 
 impl std::fmt::Display for ArchiveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Self::ReasoningStorage => write!(f, "无法完整保存或校验本机推理归档，已停止转发"),
             Self::InvalidRequest => write!(f, "历史归档要求请求正文为 JSON 对象"),
             Self::UnsupportedItem { index, item_type } => write!(
                 f,
@@ -108,6 +112,25 @@ fn contains_registry_carrier(value: &Value) -> bool {
                 .iter()
                 .filter_map(|key| map.get(*key))
                 .any(contains_registry_carrier)
+        }
+        _ => false,
+    }
+}
+
+/// 子代理正文可能只存在于密文中；必须保留原生协议才能由接收方解读。
+/// 仅检查协议内容边界，不进入工具参数或解析普通文字。
+fn has_encrypted_agent_content(value: &Value) -> bool {
+    match value {
+        Value::Array(items) => items.iter().any(has_encrypted_agent_content),
+        Value::Object(map) => {
+            map.get("type").and_then(Value::as_str) == Some("encrypted_content")
+                || map
+                    .get("encrypted_content")
+                    .is_some_and(|value| !value.is_null())
+                || ["content", "output", "results"]
+                    .iter()
+                    .filter_map(|key| map.get(*key))
+                    .any(has_encrypted_agent_content)
         }
         _ => false,
     }
@@ -215,6 +238,7 @@ fn disposition(
         );
     let registry_output = matches!(kind, "function_call_output" | "custom_tool_call_output")
         && contains_registry_carrier(value);
+    let encrypted_agent = kind == "agent_message" && has_encrypted_agent_content(value);
     let native = match kind {
         "message" => match item.get("role").and_then(Value::as_str) {
             Some("system" | "developer" | "user") => true,
@@ -240,7 +264,7 @@ fn disposition(
                     .and_then(Value::as_str)
                     .is_some_and(|call_id| native_calls.contains(call_id))
         }
-        "agent_message" => media,
+        "agent_message" => media || encrypted_agent,
         _ => {
             return Err(ArchiveError::UnsupportedItem {
                 index,
@@ -250,7 +274,7 @@ fn disposition(
     };
     // 工具调用参数属于用户数据，允许含任意 type/content 键且保持原样。
     // 原生指令、用户消息及动态注册沿用既有处理；新增媒体项仍检查未知的兄弟内容块。
-    if (!native || media)
+    if (!native || media || encrypted_agent)
         && !matches!(kind, "function_call" | "custom_tool_call")
         && !registry_output
         && !native_message
@@ -295,6 +319,60 @@ pub(crate) fn build(
     body: &Value,
     reasoning: ReasoningMode,
 ) -> Result<Option<ArchivedRequest>, ArchiveError> {
+    build_inner(body, reasoning, None)
+}
+
+/// 不透明密文写入本机内容寻址存储，出站仅带校验引用；可读摘要仍原样发送。
+pub(crate) fn build_with_reasoning_store(
+    body: &Value,
+    directory: &Path,
+) -> Result<Option<ArchivedRequest>, ArchiveError> {
+    build_inner(body, ReasoningMode::Archive, Some(directory))
+}
+
+fn store_reasoning(item: &Value, directory: &Path) -> Result<Value, ArchiveError> {
+    if !item.get("encrypted_content").is_some_and(Value::is_string) {
+        return Ok(item.clone());
+    }
+    let data = serde_json::to_vec(item).expect("已有 JSON 可序列化");
+    let digest = format!("{:x}", Sha256::digest(&data));
+    let path = directory.join(format!("{digest}.json"));
+    let persist = || -> std::io::Result<()> {
+        std::fs::create_dir_all(directory)?;
+        match std::fs::read(&path) {
+            Ok(existing) if existing == data => return Ok(()),
+            Ok(_) => return Err(std::io::Error::other("推理归档校验不符")),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+        let mut temporary = tempfile::NamedTempFile::new_in(directory)?;
+        temporary.write_all(&data)?;
+        temporary.as_file().sync_all()?;
+        if let Err(error) = temporary.persist_noclobber(&path) {
+            if error.error.kind() != std::io::ErrorKind::AlreadyExists {
+                return Err(error.error);
+            }
+        }
+        if std::fs::read(&path)? != data {
+            return Err(std::io::Error::other("推理归档读回不符"));
+        }
+        Ok(())
+    };
+    persist().map_err(|_| ArchiveError::ReasoningStorage)?;
+    let mut referenced = item.clone();
+    referenced["encrypted_content"] = json!({
+        "cc_switch_local_reasoning_sha256":digest,
+        "stored_json_bytes":data.len(),
+        "note":"完整原生推理已保存在本机；此引用不是可解读的原生推理状态"
+    });
+    Ok(referenced)
+}
+
+fn build_inner(
+    body: &Value,
+    reasoning: ReasoningMode,
+    directory: Option<&Path>,
+) -> Result<Option<ArchivedRequest>, ArchiveError> {
     if !body.is_object() {
         return Err(ArchiveError::InvalidRequest);
     }
@@ -329,7 +407,13 @@ pub(crate) fn build(
                 stats.native_reasoning_items += usize::from(is_reasoning);
             }
             Disposition::Archive => {
-                pending.push(item.clone());
+                pending.push(
+                    if let Some(directory) = directory.filter(|_| is_reasoning) {
+                        store_reasoning(item, directory)?
+                    } else {
+                        item.clone()
+                    },
+                );
                 stats.archived_reasoning_items += usize::from(is_reasoning);
             }
         }
@@ -346,6 +430,77 @@ pub(crate) fn build(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stored_reasoning_avoids_ciphertext_token_expansion_and_restores_exactly() {
+        let directory = tempfile::tempdir().unwrap();
+        let reasoning = json!({
+            "type":"reasoning", "id":"rs-large",
+            "encrypted_content":"opaque-ciphertext-".repeat(4096),
+            "summary":[{"type":"summary_text","text":"可读的审计进度完整保留"}]
+        });
+        let body = json!({"input":[reasoning, {"role":"user","content":"继续审计"}]});
+        let result = build_with_reasoning_store(&body, directory.path())
+            .unwrap()
+            .unwrap();
+        let records: Vec<Value> = serde_json::from_str(
+            result.body["input"][0]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .strip_prefix(ARCHIVE_PREFIX)
+                .unwrap(),
+        )
+        .unwrap();
+        let reference = records[0]["encrypted_content"]["cc_switch_local_reasoning_sha256"]
+            .as_str()
+            .unwrap();
+        let bytes = std::fs::read(directory.path().join(format!("{reference}.json"))).unwrap();
+        assert_eq!(format!("{:x}", Sha256::digest(&bytes)), reference);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&bytes).unwrap(),
+            body["input"][0]
+        );
+        assert_eq!(records[0]["summary"], body["input"][0]["summary"]);
+        assert_eq!(result.body["input"][1], body["input"][1]);
+        assert!(serde_json::to_vec(&result.body).unwrap().len() < 2048);
+        let again = build_with_reasoning_store(&body, directory.path())
+            .unwrap()
+            .unwrap();
+        assert_eq!(again.body, result.body);
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn reasoning_storage_failure_and_tampering_stop_instead_of_dropping_data() {
+        let directory = tempfile::tempdir().unwrap();
+        let blocked = directory.path().join("not-a-directory");
+        std::fs::write(&blocked, b"fixture").unwrap();
+        let body = json!({"input":[{"type":"reasoning","encrypted_content":"opaque-value"}]});
+        assert!(matches!(
+            build_with_reasoning_store(&body, &blocked),
+            Err(ArchiveError::ReasoningStorage)
+        ));
+        build_with_reasoning_store(&body, directory.path()).unwrap();
+        let file = std::fs::read_dir(directory.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| path.extension().is_some_and(|ext| ext == "json"))
+            .unwrap();
+        std::fs::write(file, b"tampered").unwrap();
+        assert!(matches!(
+            build_with_reasoning_store(&body, directory.path()),
+            Err(ArchiveError::ReasoningStorage)
+        ));
+        assert_eq!(body["input"][0]["encrypted_content"], "opaque-value");
+    }
+
+    #[test]
+    fn invalid_history_does_not_persist_a_partial_reasoning_archive() {
+        let directory = tempfile::tempdir().unwrap();
+        let body = json!({"input":[{"type":"reasoning","encrypted_content":"opaque"}, {"type":"unknown-future-item"}]});
+        assert!(build_with_reasoning_store(&body, directory.path()).is_err());
+        assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 0);
+    }
 
     fn restore(input: &Value) -> Vec<Value> {
         let mut restored = Vec::new();
@@ -508,15 +663,42 @@ mod tests {
     }
 
     #[test]
-    fn agent_ciphertext_blocks_remain_complete_history_data() {
+    fn agent_ciphertext_blocks_keep_native_delivery_in_both_reasoning_modes() {
         let body = json!({"input":[
             {"type":"agent_message","author":"fixture","content":[
                 {"type":"input_text","text":"完整子任务结果"},
                 {"type":"encrypted_content","encrypted_content":"原始不透明密文"}
-            ]}
+            ]},
+            {"role":"assistant","content":"普通模型历史仍需归档"}
         ]});
-        let result = build(&body, ReasoningMode::Native).unwrap().unwrap();
-        assert_eq!(Value::Array(restore(&result.body["input"])), body["input"]);
+        for mode in [ReasoningMode::Native, ReasoningMode::Archive] {
+            let result = build(&body, mode).unwrap().unwrap();
+            assert_eq!(result.body["input"][0], body["input"][0]);
+            assert_eq!(result.stats.archived_items, 1);
+            assert_eq!(Value::Array(restore(&result.body["input"])), body["input"]);
+            let opaque_only = json!({"input":[{
+                "type":"agent_message","author":"fixture",
+                "content":[{"type":"input_text","text":""}],
+                "encrypted_content":"仅密文承载的任务正文"
+            }]});
+            assert!(build(&opaque_only, mode).unwrap().is_none());
+        }
+    }
+
+    #[test]
+    fn agent_ciphertext_does_not_bypass_unknown_content_validation() {
+        let body = json!({"input":[{
+            "type":"agent_message","content":[
+                {"type":"encrypted_content","encrypted_content":"原始密文"},
+                {"type":"future_protocol_content","data":"未知内容"}
+            ]
+        }]});
+        for mode in [ReasoningMode::Native, ReasoningMode::Archive] {
+            assert!(matches!(
+                build(&body, mode),
+                Err(ArchiveError::UnsupportedItem { index: 0, .. })
+            ));
+        }
     }
 
     #[test]

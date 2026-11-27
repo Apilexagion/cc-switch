@@ -1548,7 +1548,7 @@ export function CodexFormFields({
             }),
             t("codexConfig.sessionAutoContinuationHint", {
               defaultValue:
-                "仅本地代理、路由接管和聚合模式的第三方 Codex 原生 Responses 转发适用。明确收到会话轮数上限错误后，为本供应商下的当前会话更换上游身份，并保留完整聊天记录继续对话；最多自动重试一次，后续请求沿用新身份。官方 ChatGPT / Codex OAuth、直连及 Chat / Anthropic 转换不生效。上游若按其他信息计数，仍可能失败。",
+                "仅本地代理、路由接管和聚合模式的第三方 Codex 原生 Responses 转发适用。明确到限后更换上游身份并保留完整历史重试一次；若仍明确到限且含原生推理，则将完整推理 JSON 保存在本机，出站请求保留原有摘要及哈希引用，再以兼容模式重试一次，后续沿用此模式。推理密文在本机保留，但不再作为原生推理状态复用。官方 OAuth、直连及协议转换不生效；上游仍可能拒绝。",
             }),
             "codex-session-auto-continuation",
           )}

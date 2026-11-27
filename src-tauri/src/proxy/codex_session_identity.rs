@@ -39,6 +39,7 @@ struct Entry {
 struct EntryState {
     generation: u64,
     identity: Option<String>,
+    archive_reasoning: bool,
     last_used: Instant,
     // 只缓存响应头，不保存请求正文；回合和身份代都是缓存边界。
     turns: BTreeMap<String, (HeaderValue, Instant)>,
@@ -48,9 +49,14 @@ struct EntryState {
 pub(crate) struct Snapshot {
     generation: u64,
     identity: Option<String>,
+    archive_reasoning: bool,
 }
 
 impl Snapshot {
+    pub(crate) fn archive_reasoning(&self) -> bool {
+        self.archive_reasoning
+    }
+
     pub(crate) fn generation(&self) -> u64 {
         self.generation
     }
@@ -373,6 +379,7 @@ fn acquire_from_at(
                 state: Mutex::new(EntryState {
                     generation: 0,
                     identity: None,
+                    archive_reasoning: false,
                     last_used: now,
                     turns: BTreeMap::new(),
                 }),
@@ -408,21 +415,34 @@ impl Lease {
         Snapshot {
             generation: state.generation,
             identity: state.identity.clone(),
+            archive_reasoning: state.archive_reasoning,
         }
     }
 
     /// 只允许失败请求观察到的那一代推进；并发失败共享同一新代。
     pub(crate) fn rotate(&self, failed: &Snapshot) -> Snapshot {
+        self.rotate_with_history_mode(failed, false)
+    }
+
+    /// 普通归档仍明确到限时升级；后续请求沿用，不能退回旧推理状态。
+    pub(crate) fn rotate_archiving_reasoning(&self, failed: &Snapshot) -> Snapshot {
+        self.rotate_with_history_mode(failed, true)
+    }
+
+    fn rotate_with_history_mode(&self, failed: &Snapshot, archive_reasoning: bool) -> Snapshot {
         let mut state = self.entry.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.generation == failed.generation {
+        if state.generation == failed.generation || (archive_reasoning && !state.archive_reasoning)
+        {
             state.generation = state.generation.saturating_add(1);
             state.identity = Some(uuid::Uuid::new_v4().to_string());
             state.turns.clear();
         }
+        state.archive_reasoning |= archive_reasoning;
         state.last_used = Instant::now();
         Snapshot {
             generation: state.generation,
             identity: state.identity.clone(),
+            archive_reasoning: state.archive_reasoning,
         }
     }
 

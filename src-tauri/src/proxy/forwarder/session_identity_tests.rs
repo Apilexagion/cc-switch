@@ -1070,6 +1070,18 @@ fn restore_archived_input(body: &Value) -> Value {
             restored.push(item.clone());
         }
     }
+    for item in &mut restored {
+        if item.get("type").and_then(Value::as_str) == Some("reasoning") {
+            if let Some(digest) = item
+                .get("encrypted_content")
+                .and_then(|value| value.get("cc_switch_local_reasoning_sha256"))
+                .and_then(Value::as_str)
+            {
+                let path = session_identity::reasoning_store_dir().join(format!("{digest}.json"));
+                *item = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+            }
+        }
+    }
     Value::Array(restored)
 }
 
@@ -1159,8 +1171,8 @@ async fn session_identity_archive_retries_once_and_reuses_complete_history_on_la
 }
 
 #[tokio::test]
-async fn session_identity_archive_consecutive_limits_still_stop_after_one_retry() {
-    let upstream = upstream(vec![turn_limit(), turn_limit(), ok()]).await;
+async fn session_identity_archive_consecutive_limits_stop_after_compatibility_attempt() {
+    let upstream = upstream(vec![turn_limit(), turn_limit(), turn_limit(), ok()]).await;
     let mut provider = provider(&upstream, Some(true));
     provider
         .meta
@@ -1183,12 +1195,160 @@ async fn session_identity_archive_consecutive_limits_still_stop_after_one_retry(
         })
     ));
     let seen = upstream.seen.lock().await;
-    assert_eq!(seen.len(), 2, "完整历史归档不增加第二次额外重试");
+    assert_eq!(seen.len(), 3, "普通归档和兼容归档各重试一次后必须停止");
     assert!(seen[1].body["input"]
         .as_array()
         .unwrap()
         .iter()
         .all(|item| item.get("role").and_then(Value::as_str) != Some("assistant")));
+}
+
+#[tokio::test]
+async fn session_identity_reasoning_compatibility_recovers_and_persists_across_turns() {
+    let upstream = upstream(vec![turn_limit(), turn_limit(), ok(), ok()]).await;
+    let mut provider = provider(&upstream, Some(true));
+    provider
+        .meta
+        .as_mut()
+        .unwrap()
+        .codex_session_history_archive = Some(true);
+    let session = uuid::Uuid::new_v4().to_string();
+    let mut request = body(&session);
+    // 模拟复杂审计会话：普通文字已归档后仍残留大量原生推理历史。
+    for index in 0..128 {
+        request["input"].as_array_mut().unwrap().push(json!({
+            "type":"reasoning", "id":format!("reasoning-history-{index}"),
+            "encrypted_content":format!("opaque-history-{index}"), "summary":[]
+        }));
+    }
+    let media =
+        json!({"role":"assistant","content":[{"type":"output_image","result":"fixture-image"}]});
+    let registry = json!({"type":"additional_tools","tools":[{"name":"loaded-fixture"}]});
+    request["input"]
+        .as_array_mut()
+        .unwrap()
+        .extend([media.clone(), registry.clone()]);
+    let response = consume(
+        send(
+            &forwarder(&provider, &session),
+            &provider,
+            headers(&session, "turn-current"),
+            request.clone(),
+        )
+        .await,
+    )
+    .await;
+    let response: Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(response["status"], "completed");
+    assert_eq!(
+        response["output"].as_array().unwrap().len(),
+        1,
+        "只在成功后提示一次"
+    );
+
+    let mut next = request.clone();
+    next["metadata"]["turn_id"] = json!("turn-next");
+    next["client_metadata"]["turn_id"] = json!("turn-next");
+    next["input"].as_array_mut().unwrap().extend([
+        json!({"type":"reasoning","id":"rs-new","encrypted_content":"new-opaque-reasoning","summary":[]}),
+        json!({"role":"user","content":"继续使用之前完整的审计结果"}),
+    ]);
+    let response = consume(
+        send(
+            &forwarder(&provider, &session),
+            &provider,
+            headers(&session, "turn-next"),
+            next.clone(),
+        )
+        .await,
+    )
+    .await;
+    let response: Value = serde_json::from_slice(&response).unwrap();
+    assert_eq!(
+        response["output"],
+        json!([]),
+        "后续复用兼容形态，不重复提示"
+    );
+
+    let seen = upstream.seen.lock().await;
+    assert_eq!(seen.len(), 4, "首次三次有界尝试，下一回合直接使用兼容归档");
+    let reasoning_count = |body: &Value| {
+        body["input"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|item| item.get("type").and_then(Value::as_str) == Some("reasoning"))
+            .count()
+    };
+    assert_eq!(
+        reasoning_count(&seen[1].body),
+        129,
+        "第一次普通归档仍保留原生推理"
+    );
+    for (attempt, original) in [(&seen[2], &request), (&seen[3], &next)] {
+        assert_eq!(
+            reasoning_count(&attempt.body),
+            0,
+            "兼容归档不再把旧推理作为原生状态重送"
+        );
+        assert_eq!(
+            restore_archived_input(&attempt.body),
+            original["input"],
+            "包括密文在内的完整历史逐项可恢复"
+        );
+        let items = attempt.body["input"].as_array().unwrap();
+        assert!(items.contains(&media), "媒体仍原生保留");
+        assert!(items.contains(&registry), "工具注册仍原生保留");
+        assert!(
+            items.contains(&request["input"][5]),
+            "原生压缩密文仍完整保留"
+        );
+        for field in ["tools", "previous_response_id", "conversation"] {
+            assert_eq!(attempt.body[field], original[field], "不擅自删除 {field}");
+        }
+    }
+    assert_ne!(seen[1].headers["session_id"], session);
+    assert_ne!(
+        seen[1].headers["session_id"], seen[2].headers["session_id"],
+        "切换兼容形态时重新建立身份代"
+    );
+    assert_eq!(seen[2].headers["session_id"], seen[3].headers["session_id"]);
+}
+
+#[tokio::test]
+async fn session_identity_reasoning_compatibility_does_not_retry_unrelated_second_error() {
+    let upstream = upstream(vec![
+        turn_limit(),
+        error(400, "invalid_request_error", "ordinary validation failure"),
+        ok(),
+    ])
+    .await;
+    let mut provider = provider(&upstream, Some(true));
+    provider
+        .meta
+        .as_mut()
+        .unwrap()
+        .codex_session_history_archive = Some(true);
+    let session = uuid::Uuid::new_v4().to_string();
+    let result = send(
+        &forwarder(&provider, &session),
+        &provider,
+        headers(&session, "turn-current"),
+        body(&session),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(ForwardError {
+            error: ProxyError::UpstreamError { status: 400, .. },
+            ..
+        })
+    ));
+    assert_eq!(
+        upstream.seen.lock().await.len(),
+        2,
+        "普通400不能触发兼容归档或额外重试"
+    );
 }
 
 #[tokio::test]
@@ -1272,6 +1432,42 @@ async fn session_identity_archive_preserves_native_media_and_tool_pairs_across_t
     assert_eq!(restore_archived_input(&seen[2].body), next_request["input"]);
     assert_ne!(seen[1].headers["session_id"], session);
     assert_eq!(seen[1].headers["session_id"], seen[2].headers["session_id"]);
+}
+
+#[tokio::test]
+async fn session_identity_no_reasoning_history_does_not_add_a_pointless_compatibility_attempt() {
+    let upstream = upstream(vec![turn_limit(), turn_limit(), ok()]).await;
+    let mut provider = provider(&upstream, Some(true));
+    provider
+        .meta
+        .as_mut()
+        .unwrap()
+        .codex_session_history_archive = Some(true);
+    let session = uuid::Uuid::new_v4().to_string();
+    let mut request = body(&session);
+    request["input"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|item| item.get("type").and_then(Value::as_str) != Some("reasoning"));
+    let result = send(
+        &forwarder(&provider, &session),
+        &provider,
+        headers(&session, "turn-current"),
+        request,
+    )
+    .await;
+    assert!(matches!(
+        result,
+        Err(ForwardError {
+            error: ProxyError::UpstreamError { status: 400, .. },
+            ..
+        })
+    ));
+    assert_eq!(
+        upstream.seen.lock().await.len(),
+        2,
+        "没有原生推理就没有可升级的兼容归档，不盲目多试"
+    );
 }
 
 #[tokio::test]

@@ -378,6 +378,43 @@ fn simultaneous_failures_share_one_generation() {
 }
 
 #[test]
+fn reasoning_archive_escalation_is_shared_and_never_downgrades() {
+    let store = Mutex::new(Store::default());
+    let (headers, body) = request("thread-a", "turn-a");
+    let lease = acquire_from(&store, "provider-a", &headers, &body).unwrap();
+    let original = lease.snapshot();
+    assert!(!original.archive_reasoning());
+    let first = lease.rotate(&original);
+    let barrier = Arc::new(std::sync::Barrier::new(16));
+    let workers: Vec<_> = (0..16)
+        .map(|_| {
+            let lease = lease.clone();
+            let failed = first.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                lease.rotate_archiving_reasoning(&failed)
+            })
+        })
+        .collect();
+    let recovered: Vec<_> = workers.into_iter().map(|w| w.join().unwrap()).collect();
+    assert!(recovered.iter().all(|snapshot| {
+        snapshot.archive_reasoning()
+            && snapshot.generation() == 2
+            && snapshot.identity == recovered[0].identity
+    }));
+    // 迟到的普通轮换不能覆盖已经升级的兼容模式或再次推进旧代。
+    let stale = lease.rotate(&first);
+    assert_eq!(stale.identity, recovered[0].identity);
+    assert!(stale.archive_reasoning());
+    let next = acquire_from(&store, "provider-a", &headers, &body).unwrap();
+    assert!(next.snapshot().archive_reasoning());
+    assert!(next.rotate(&stale).archive_reasoning());
+    let other = acquire_from(&store, "provider-b", &headers, &body).unwrap();
+    assert!(!other.snapshot().archive_reasoning());
+}
+
+#[test]
 fn route_state_is_scoped_to_generation_and_explicit_turn() {
     let store = Mutex::new(Store::default());
     let (headers, body) = request("thread-a", "turn-a");
